@@ -200,16 +200,16 @@ class Neo4jClient:
 
     async def analyze_impact(self, node_id: str, repo_id: str) -> dict:
         """
-        Compute impact analysis for a module node:
-        - affected_nodes: all downstream nodes reachable via IMPORTS
-        - reverse_affected: all upstream nodes (who imports this)
-        - max_depth: longest downstream path
-        - fan_out: direct children
-        - fan_in: direct parents
-        Returns a dict with score, risk, metrics, affected_ids, explanation.
+        Compute impact analysis for a module node, scored relative to the
+        actual distribution of all modules in the same repo.
+
+        Risk is classified by percentile rank — not hardcoded thresholds —
+        so a module in the top 20% of the repo's raw score distribution is
+        HIGH regardless of the absolute number.
         """
         async with self._driver.session() as s:
-            # Downstream (forward) reachability — what this node affects
+            # ── Target node metrics ─────────────────────────────────────────
+
             fwd = await s.run(
                 """
                 MATCH (src:Module {node_id: $node_id})
@@ -218,69 +218,115 @@ class Neo4jClient:
                        downstream.path AS path,
                        length(path) AS depth
                 """,
-                node_id=node_id,
-                repo_id=repo_id,
+                node_id=node_id, repo_id=repo_id,
             )
             fwd_rows = await fwd.data()
 
-            # Upstream (reverse) reachability — who depends on this node
             rev = await s.run(
                 """
                 MATCH (src:Module {node_id: $node_id})
                 MATCH (upstream:Module {repo_id: $repo_id})-[:IMPORTS*1..]->(src)
                 RETURN DISTINCT upstream.node_id AS id, upstream.path AS path
                 """,
-                node_id=node_id,
-                repo_id=repo_id,
+                node_id=node_id, repo_id=repo_id,
             )
             rev_rows = await rev.data()
 
-            # Direct fan-out (immediate children)
             fanout_res = await s.run(
                 "MATCH (src:Module {node_id: $node_id})-[:IMPORTS]->(c) RETURN count(c) AS n",
                 node_id=node_id,
             )
-            fanout_data = await fanout_res.data()
-            fan_out = fanout_data[0]["n"] if fanout_data else 0
+            fan_out = ((await fanout_res.data()) or [{"n": 0}])[0]["n"]
 
-            # Direct fan-in (immediate parents)
             fanin_res = await s.run(
                 "MATCH (p)-[:IMPORTS]->(src:Module {node_id: $node_id}) RETURN count(p) AS n",
                 node_id=node_id,
             )
-            fanin_data = await fanin_res.data()
-            fan_in = fanin_data[0]["n"] if fanin_data else 0
+            fan_in = ((await fanin_res.data()) or [{"n": 0}])[0]["n"]
 
+            # ── Repo-wide distribution (raw scores for every module) ────────
+            # Keep `m` in scope through every WITH so each OPTIONAL MATCH
+            # binds to the correct module node.
+            repo_dist_res = await s.run(
+                """
+                MATCH (m:Module {repo_id: $repo_id})
+                OPTIONAL MATCH (up:Module {repo_id: $repo_id})-[:IMPORTS*1..]->(m)
+                WITH m, count(DISTINCT up) AS up_count
+                OPTIONAL MATCH (m)-[:IMPORTS*1..]->(dn:Module {repo_id: $repo_id})
+                WITH m, up_count, count(DISTINCT dn) AS dn_count
+                OPTIONAL MATCH (m)-[:IMPORTS]->(direct:Module {repo_id: $repo_id})
+                WITH m, up_count, dn_count, count(DISTINCT direct) AS fo
+                OPTIONAL MATCH (parent:Module {repo_id: $repo_id})-[:IMPORTS]->(m)
+                RETURN m.node_id AS nid,
+                       up_count,
+                       dn_count,
+                       fo,
+                       count(DISTINCT parent) AS fi
+                """,
+                repo_id=repo_id,
+            )
+            repo_rows = await repo_dist_res.data()
+
+        # ── Compute raw score for the target node ──────────────────────────
         affected_count = len(fwd_rows)
         upstream_count = len(rev_rows)
         max_depth = max((r["depth"] for r in fwd_rows), default=0)
 
-        # Normalize score against a practical max
-        raw = (affected_count * 2) + (max_depth * 5) + (fan_out * 3) + (fan_in * 4)
-        max_possible = 200  # practical ceiling for typical repos
-        impact_score = min(100, int((raw / max_possible) * 100)) if raw > 0 else 0
+        # Score uses only signals available for every node in the bulk query
+        # so target and repo rows are on the same scale.
+        def _raw(up: int, dn: int, fo: int, fi: int) -> float:
+            return (up * 4) + (dn * 2) + (fo * 2) + (fi * 3)
 
-        if impact_score < 30:
-            risk_level = "LOW"
-            risk_emoji = "🟢"
-        elif impact_score < 70:
-            risk_level = "MEDIUM"
-            risk_emoji = "🟡"
+        target_raw = _raw(upstream_count, affected_count, fan_out, fan_in)
+
+        # ── Build repo distribution of raw scores ──────────────────────────
+        all_raws: list[float] = []
+        for row in repo_rows:
+            all_raws.append(_raw(
+                row.get("up_count") or 0,
+                row.get("dn_count") or 0,
+                row.get("fo") or 0,
+                row.get("fi") or 0,
+            ))
+
+        total_modules = len(all_raws)
+
+        # Percentile rank: fraction of repo modules this node scores higher than
+        if total_modules <= 1:
+            percentile = 100.0
         else:
-            risk_level = "HIGH"
-            risk_emoji = "🔴"
+            rank = sum(1 for s in all_raws if target_raw > s)
+            percentile = (rank / (total_modules - 1)) * 100
+
+        # impact_score = percentile (0–100), represents position in the repo
+        impact_score = round(percentile)
+
+        # ── Risk relative to repo distribution ─────────────────────────────
+        # TOP 20 %  → HIGH   (this module is more critical than 80 % of repo)
+        # 20–60 %   → MEDIUM
+        # BOTTOM 40 % → LOW
+        if percentile >= 80:
+            risk_level, risk_emoji = "HIGH", "�"
+        elif percentile >= 40:
+            risk_level, risk_emoji = "MEDIUM", "🟡"
+        else:
+            risk_level, risk_emoji = "LOW", "�"
 
         explanation = (
-            f"This module has {risk_level} impact. "
-            f"It directly or indirectly affects {affected_count} downstream module(s) "
-            f"with a maximum dependency depth of {max_depth}. "
-            f"{upstream_count} module(s) depend on it (fan-in: {fan_in} direct). "
-            f"Changing this file risks breaking {upstream_count} upstream dependent(s)."
+            f"This module ranks in the {impact_score}th percentile of the repo by impact. "
+            f"{upstream_count} module(s) transitively depend on it — changes here "
+            f"can break {upstream_count} upstream caller(s). "
+            f"It reaches {affected_count} downstream module(s) at a max depth of {max_depth}. "
+            f"Direct fan-in: {fan_in}, fan-out: {fan_out}. "
+            f"Risk is {'elevated' if risk_level != 'LOW' else 'low'} relative to the "
+            f"{total_modules} modules in this repo."
         )
 
         return {
             "node_id": node_id,
             "impact_score": impact_score,
+            "percentile": round(percentile, 1),
+            "total_modules_in_repo": total_modules,
             "risk_level": risk_level,
             "risk_emoji": risk_emoji,
             "metrics": {
@@ -294,4 +340,5 @@ class Neo4jClient:
             "upstream_nodes": [{"id": r["id"], "path": r["path"]} for r in rev_rows],
             "explanation": explanation,
         }
+
 

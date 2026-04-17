@@ -61,29 +61,30 @@ function ImpactPanel({ repoId, nodeId }: { repoId: string; nodeId: string }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      {/* Score bar */}
+      {/* Score bar — percentile rank within repo */}
       <div>
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: "0.35rem",
+            marginBottom: "0.25rem",
           }}
         >
           <span
             style={{
-              fontSize: "0.75rem",
+              fontSize: "0.72rem",
               fontWeight: 700,
               color: "var(--text-muted)",
               textTransform: "uppercase",
               letterSpacing: "0.07em",
             }}
           >
-            Impact Score
+            Repo Percentile
           </span>
           <span style={{ fontSize: "1rem", fontWeight: 700, color: riskColor }}>
-            {scorePercent} / 100
+            {impact.impact_score}
+            <span style={{ fontSize: "0.72rem", opacity: 0.7 }}>th</span>
           </span>
         </div>
         <div
@@ -97,13 +98,23 @@ function ImpactPanel({ repoId, nodeId }: { repoId: string; nodeId: string }) {
           <div
             style={{
               height: "100%",
-              width: `${scorePercent}%`,
+              width: `${impact.impact_score}%`,
               background: riskColor,
               borderRadius: 4,
               transition: "width 0.5s ease",
             }}
           />
         </div>
+        <p
+          style={{
+            fontSize: "0.68rem",
+            color: "var(--text-muted)",
+            marginTop: "0.25rem",
+          }}
+        >
+          More critical than {impact.impact_score}% of{" "}
+          {impact.total_modules_in_repo} modules in this repo
+        </p>
       </div>
 
       {/* Risk badge */}

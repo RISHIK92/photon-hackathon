@@ -90,6 +90,8 @@ export interface ImpactNode {
 export interface ImpactAnalysis {
   node_id: string;
   impact_score: number;
+  percentile: number;
+  total_modules_in_repo: number;
   risk_level: "LOW" | "MEDIUM" | "HIGH";
   risk_emoji: string;
   metrics: {
