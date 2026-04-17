@@ -106,12 +106,25 @@ class Neo4jClient:
     ) -> None:
         """Create an IMPORTS edge between modules if the target exists."""
         async with self._driver.session() as s:
-            # First, find matching target(s) for debugging
+            # Try multiple matching strategies in order of precision:
+            # 1. Exact match (without extension)
+            # 2. Ends with the fragment (for resolved relative paths)
+            # 3. Contains the fragment (fallback)
+            
+            # First try exact match (path equals fragment or fragment.ext)
             find_result = await s.run(
                 """
                 MATCH (tgt:Module)
                 WHERE tgt.repo_id = $repo_id
-                  AND tgt.path CONTAINS $fragment
+                  AND (tgt.path = $fragment 
+                       OR tgt.path = $fragment + '.ts'
+                       OR tgt.path = $fragment + '.tsx'
+                       OR tgt.path = $fragment + '.js'
+                       OR tgt.path = $fragment + '.jsx'
+                       OR tgt.path = $fragment + '.py'
+                       OR tgt.path = $fragment + '.go'
+                       OR tgt.path = $fragment + '.rs'
+                       OR tgt.path = $fragment + '.java')
                 RETURN tgt.node_id AS id, tgt.path AS path
                 LIMIT 5
                 """,
@@ -120,27 +133,57 @@ class Neo4jClient:
             )
             matches = await find_result.data()
             
+            # If no exact match, try ends-with pattern
+            if not matches:
+                find_result = await s.run(
+                    """
+                    MATCH (tgt:Module)
+                    WHERE tgt.repo_id = $repo_id
+                      AND tgt.path ENDS WITH $fragment
+                    RETURN tgt.node_id AS id, tgt.path AS path
+                    LIMIT 5
+                    """,
+                    repo_id=repo_id,
+                    fragment=target_path_fragment,
+                )
+                matches = await find_result.data()
+            
+            # If still no match, try contains as final fallback
+            if not matches:
+                find_result = await s.run(
+                    """
+                    MATCH (tgt:Module)
+                    WHERE tgt.repo_id = $repo_id
+                      AND tgt.path CONTAINS $fragment
+                    RETURN tgt.node_id AS id, tgt.path AS path
+                    LIMIT 5
+                    """,
+                    repo_id=repo_id,
+                    fragment=target_path_fragment,
+                )
+                matches = await find_result.data()
+            
             if not matches:
                 # No match found - log for debugging
-                log.debug("import.no_match", from_id=from_module_id, fragment=target_path_fragment)
+                log.debug("import.no_match", from_id=from_module_id, fragment=target_path_fragment, repo_id=repo_id)
                 return
             
             if len(matches) > 1:
-                # Multiple matches - log for debugging, but still create edges
-                log.debug("import.multiple_matches", from_id=from_module_id, fragment=target_path_fragment, matches=[m["path"] for m in matches])
+                # Multiple matches - prefer shortest path (most specific)
+                matches = sorted(matches, key=lambda m: len(m["path"]))
+                log.debug("import.multiple_matches", from_id=from_module_id, fragment=target_path_fragment, 
+                         matches=[m["path"] for m in matches], selected=matches[0]["path"])
             
-            # Create the edge(s)
+            # Create edge to the best match
+            target_id = matches[0]["id"]
             await s.run(
                 """
                 MATCH (src:Module {node_id: $from_id})
-                MATCH (tgt:Module)
-                WHERE tgt.repo_id = $repo_id
-                  AND tgt.path CONTAINS $fragment
+                MATCH (tgt:Module {node_id: $target_id})
                 MERGE (src)-[:IMPORTS]->(tgt)
                 """,
                 from_id=from_module_id,
-                repo_id=repo_id,
-                fragment=target_path_fragment,
+                target_id=target_id,
             )
 
     async def get_repo_graph(self, repo_id: str, depth: int = 2) -> dict:
@@ -172,11 +215,11 @@ class Neo4jClient:
         async with self._driver.session() as s:
             result = await s.run(
                 """
-                MATCH (m:Module {node_id: $node_id})-[r]-(neighbor:Module {repo_id: $repo_id})
+                MATCH (m:Module {node_id: $node_id})-[r:IMPORTS]-(neighbor:Module {repo_id: $repo_id})
                 RETURN
-                  m.node_id AS src_id, m.path AS src_path, m.language AS src_lang,
+                  m.node_id AS src_id, m.path AS src_path, m.language AS src_lang, m.size_bytes AS src_size,
                   neighbor.node_id AS nb_id, neighbor.path AS nb_path,
-                  neighbor.language AS nb_lang,
+                  neighbor.language AS nb_lang, neighbor.size_bytes AS nb_size,
                   type(r) AS label,
                   startNode(r).node_id AS edge_src, endNode(r).node_id AS edge_tgt
                 """,
@@ -188,8 +231,26 @@ class Neo4jClient:
         seen_nodes: dict[str, dict] = {}
         edges: list[dict] = []
         for row in rows:
-            seen_nodes[row["src_id"]] = {"id": row["src_id"], "path": row["src_path"], "language": row["src_lang"]}
-            seen_nodes[row["nb_id"]] = {"id": row["nb_id"], "path": row["nb_path"], "language": row["nb_lang"]}
+            # Extract filename from path for label
+            src_label = row["src_path"].split("/")[-1]
+            nb_label = row["nb_path"].split("/")[-1]
+            
+            seen_nodes[row["src_id"]] = {
+                "id": row["src_id"], 
+                "path": row["src_path"], 
+                "label": src_label,
+                "language": row["src_lang"],
+                "size_bytes": row["src_size"],
+                "repo_id": repo_id
+            }
+            seen_nodes[row["nb_id"]] = {
+                "id": row["nb_id"], 
+                "path": row["nb_path"], 
+                "label": nb_label,
+                "language": row["nb_lang"],
+                "size_bytes": row["nb_size"],
+                "repo_id": repo_id
+            }
             edges.append({"source": row["edge_src"], "target": row["edge_tgt"], "label": row["label"]})
 
         return {"nodes": list(seen_nodes.values()), "edges": edges}

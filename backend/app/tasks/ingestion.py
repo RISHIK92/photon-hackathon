@@ -352,12 +352,42 @@ def _resolve_import(import_str: str, current_file: str, language: str) -> Option
 
         # Relative imports: ./foo  ../bar/baz
         if path.startswith("."):
-            # Strip leading ./ or ../
-            fragment = re.sub(r'^\.\.?/', "", path)
-            fragment = re.sub(r'^\.\.?/', "", fragment)  # handle ../../
-            # Strip known extensions
-            fragment = re.sub(r'\.(ts|tsx|js|jsx|mjs|cjs)$', "", fragment)
-            return fragment if fragment else None
+            # Resolve relative to current file's directory
+            from pathlib import Path
+            current_dir = Path(current_file).parent
+            
+            # Resolve the relative path
+            try:
+                resolved_path = (current_dir / path).resolve()
+                # Convert back to string and get relative to root
+                # Since current_file is already relative, we need to resolve relative to it
+                current_parts = current_file.replace("\\", "/").split("/")
+                # Remove the filename, keep directory
+                current_dir_parts = current_parts[:-1]
+                
+                # Process .. and . in the import path
+                import_parts = path.replace("\\", "/").split("/")
+                result_parts = current_dir_parts[:]
+                
+                for part in import_parts:
+                    if part == "..":
+                        if result_parts:
+                            result_parts.pop()
+                    elif part == ".":
+                        continue
+                    else:
+                        result_parts.append(part)
+                
+                # Join and strip extensions
+                fragment = "/".join(result_parts)
+                fragment = re.sub(r'\.(ts|tsx|js|jsx|mjs|cjs)$', "", fragment)
+                return fragment if fragment else None
+            except Exception:
+                # Fallback to old logic
+                fragment = re.sub(r'^\.\.?/', "", path)
+                fragment = re.sub(r'^\.\.?/', "", fragment)
+                fragment = re.sub(r'\.(ts|tsx|js|jsx|mjs|cjs)$', "", fragment)
+                return fragment if fragment else None
 
         # Absolute imports starting with @ are usually aliases or node_modules
         # Only keep @/ style aliases (common in Next.js / Vite)
