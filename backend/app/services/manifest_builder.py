@@ -43,6 +43,7 @@ ALWAYS_EXCLUDE = pathspec.PathSpec.from_lines("gitwildmatch", [
     "*.pdf",
     "*.zip",
     "*.tar.gz",
+    "*.sql",
 ])
 
 # Maximum file size to process (bytes)

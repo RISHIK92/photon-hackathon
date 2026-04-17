@@ -134,21 +134,36 @@ def run_ingestion(self, repo_id: str, job_id: str):
         total_functions = 0
         all_modules: dict[str, str] = {}  # rel_path -> module_node_id
 
+        # ── Pass 3a: Upsert ALL module nodes first ─────────────────────────
+        # Must complete before creating any import edges so that every
+        # potential IMPORTS target already exists in Neo4j.
         for idx, file_info in enumerate(manifest):
             rel_path = file_info["path"]
             language = file_info["language"]
-            abs_path = file_info["abs_path"]
 
-            # Upsert module node
             module_id = loop.run_until_complete(
                 graph.upsert_module(repo_id, rel_path, language, file_info["size_bytes"])
             )
             all_modules[rel_path] = module_id
 
-            # Parse file (AST)
+            if idx % 50 == 0:
+                progress = 30 + int((idx / max(file_count, 1)) * 15)
+                publish("parsing", progress, f"Indexed {idx + 1}/{file_count} modules")
+
+        publish("parsing", 45, f"All {file_count} module nodes created. Resolving imports...")
+
+        # ── Pass 3b: Parse symbols + create IMPORTS edges ─────────────────
+        parsed_cache: dict[str, object] = {}
+        for idx, file_info in enumerate(manifest):
+            rel_path = file_info["path"]
+            language = file_info["language"]
+            abs_path = file_info["abs_path"]
+            module_id = all_modules[rel_path]
+
             if language in PARSEABLE_LANGUAGES:
                 try:
                     parsed = parse_file(abs_path, language)
+                    parsed_cache[rel_path] = parsed
                 except Exception as exc:
                     log.warning("parse.failed", path=rel_path, error=str(exc))
                     continue
@@ -166,15 +181,15 @@ def run_ingestion(self, repo_id: str, job_id: str):
                         total_functions += 1
 
                 # Resolve imports and create IMPORTS edges
+                # All target modules now exist from Pass 3a
                 for imp in parsed.imports:
-                    # Heuristic: extract module path from import string
                     resolved = _resolve_import(imp, rel_path, language)
                     if resolved:
                         loop.run_until_complete(
                             graph.upsert_import_edge(module_id, resolved, repo_id)
                         )
 
-            progress = 30 + int((idx / max(file_count, 1)) * 30)
+            progress = 45 + int((idx / max(file_count, 1)) * 17)
             if idx % 20 == 0:
                 publish("parsing", progress, f"Parsed {idx + 1}/{file_count} files")
 
@@ -194,19 +209,22 @@ def run_ingestion(self, repo_id: str, job_id: str):
             language = file_info["language"]
             abs_path = file_info["abs_path"]
 
-            if language in PARSEABLE_LANGUAGES:
-                try:
-                    parsed = parse_file(abs_path, language)
-                except Exception:
-                    continue
-            else:
-                from app.core.parser.tree_sitter_parser import ParsedFile
-                try:
-                    with open(abs_path, encoding="utf-8", errors="replace") as f:
-                        raw = f.read()
-                    parsed = ParsedFile(path=abs_path, language=language, raw_text=raw)
-                except Exception:
-                    continue
+            # Reuse already-parsed result from Pass 3b where available
+            parsed = parsed_cache.get(rel_path)
+            if parsed is None:
+                if language in PARSEABLE_LANGUAGES:
+                    try:
+                        parsed = parse_file(abs_path, language)
+                    except Exception:
+                        continue
+                else:
+                    from app.core.parser.tree_sitter_parser import ParsedFile
+                    try:
+                        with open(abs_path, encoding="utf-8", errors="replace") as f:
+                            raw = f.read()
+                        parsed = ParsedFile(path=abs_path, language=language, raw_text=raw)
+                    except Exception:
+                        continue
 
             chunks = chunk_file(repo_id, rel_path, parsed, local_path)
             all_chunks.extend(chunks)
@@ -268,29 +286,106 @@ def run_ingestion(self, repo_id: str, job_id: str):
 def _resolve_import(import_str: str, current_file: str, language: str) -> Optional[str]:
     """
     Extract a resolvable module path from an import statement string.
-    Returns a suffix to match against module paths in the graph.
+    Returns a path fragment to match against module paths in the graph,
+    or None if the import is unresolvable (stdlib, third-party, etc.).
     """
     import re
     import_str = import_str.strip()
 
     if language == "python":
-        # from .utils import foo  →  utils
-        # from app.auth import bar  →  auth
-        m = re.match(r'from\s+(\.+)?([a-zA-Z0-9_.]+)\s+import', import_str)
+        # Skip Python stdlib and known third-party packages
+        _PYTHON_STDLIB = {
+            "os", "sys", "re", "io", "abc", "ast", "copy", "csv", "math",
+            "json", "time", "uuid", "enum", "typing", "types", "pathlib",
+            "hashlib", "logging", "inspect", "itertools", "functools",
+            "datetime", "dataclasses", "collections", "contextlib",
+            "threading", "multiprocessing", "subprocess", "asyncio",
+            "socket", "ssl", "http", "urllib", "email", "html", "xml",
+            "struct", "pickle", "shelve", "sqlite3", "unittest", "warnings",
+            "traceback", "platform", "shutil", "tempfile", "glob",
+            "string", "textwrap", "pprint", "decimal", "fractions",
+            "random", "statistics", "base64", "binascii", "codecs",
+        }
+        _KNOWN_THIRD_PARTY = {
+            "fastapi", "pydantic", "sqlmodel", "sqlalchemy", "celery",
+            "redis", "neo4j", "qdrant_client", "voyageai", "google",
+            "structlog", "httpx", "uvicorn", "starlette", "alembic",
+            "pathspec", "gitpython", "tiktoken", "networkx",
+            "tree_sitter", "psycopg2", "asyncpg",
+        }
+
+        # from .utils import foo  (relative) → resolve against current_file dir
+        m = re.match(r'from\s+(\.+)([a-zA-Z0-9_.]*)\s+import', import_str)
         if m:
-            mod = m.group(2) or ""
-            return mod.replace(".", "/") if mod else None
-        m = re.match(r'import\s+([a-zA-Z0-9_.]+)', import_str)
+            dots = len(m.group(1))
+            mod = m.group(2).replace(".", "/")
+            # Walk up `dots` levels from current file's directory
+            parts = current_file.replace("\\", "/").split("/")
+            base_parts = parts[: max(0, len(parts) - dots)]
+            if mod:
+                base_parts.append(mod)
+            return "/".join(base_parts) if base_parts else None
+
+        # from app.auth import bar  /  import app.auth
+        m = re.match(r'from\s+([a-zA-Z0-9_.]+)\s+import', import_str) or \
+            re.match(r'import\s+([a-zA-Z0-9_.]+)', import_str)
         if m:
+            top_level = m.group(1).split(".")[0]
+            if top_level in _PYTHON_STDLIB or top_level in _KNOWN_THIRD_PARTY:
+                return None
             return m.group(1).replace(".", "/")
 
-    elif language in ("javascript", "typescript", "tsx"):
-        # import foo from './foo'  → foo
-        m = re.search(r'from\s+[\'"]([^\'"]+)[\'"]', import_str)
+    elif language in ("javascript", "typescript", "tsx", "jsx"):
+        m = re.search(r'(?:from|require\()\s*[\'"]([^\'"]+)[\'"]', import_str)
+        if not m:
+            return None
+        path = m.group(1)
+
+        # Relative imports: ./foo  ../bar/baz
+        if path.startswith("."):
+            # Strip leading ./ or ../
+            fragment = re.sub(r'^\.\.?/', "", path)
+            fragment = re.sub(r'^\.\.?/', "", fragment)  # handle ../../
+            # Strip known extensions
+            fragment = re.sub(r'\.(ts|tsx|js|jsx|mjs|cjs)$', "", fragment)
+            return fragment if fragment else None
+
+        # Absolute imports starting with @ are usually aliases or node_modules
+        # Only keep @/ style aliases (common in Next.js / Vite)
+        if path.startswith("@/"):
+            fragment = path[2:]
+            fragment = re.sub(r'\.(ts|tsx|js|jsx)$', "", fragment)
+            return fragment
+        # All other bare specifiers (node_modules) → skip
+        return None
+
+    elif language == "go":
+        # import "github.com/org/repo/pkg/foo" → keep only local sub-paths
+        m = re.search(r'"([^"]+)"', import_str)
         if m:
             path = m.group(1)
-            # Relative imports only
-            if path.startswith("."):
-                return path.lstrip("./").rstrip("/")
+            # Heuristic: local packages have short paths (no domain-like prefix)
+            parts = path.split("/")
+            if "." not in parts[0]:  # no domain in first segment → local
+                return path
+        return None
+
+    elif language == "rust":
+        # use crate::module::sub  /  use super::foo
+        m = re.match(r'use\s+(crate|super|self)::([a-zA-Z0-9_:]+)', import_str)
+        if m:
+            return m.group(2).replace("::", "/")
+        return None
+
+    elif language == "java":
+        # import com.example.project.SomeClass  → keep non-stdlib
+        m = re.match(r'import\s+(?:static\s+)?([a-zA-Z0-9_.]+)', import_str)
+        if m:
+            top = m.group(1).split(".")[0]
+            if top in ("java", "javax", "org", "com", "sun"):
+                # Only keep if it looks like an in-repo path
+                pass
+            return m.group(1).replace(".", "/")
+        return None
 
     return None

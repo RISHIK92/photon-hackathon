@@ -1,8 +1,9 @@
 from __future__ import annotations
+import asyncio
 import uuid
-from typing import TYPE_CHECKING
 
-import google.generativeai as genai
+import structlog
+import voyageai
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -16,17 +17,14 @@ from qdrant_client.models import (
 from app.config import get_settings
 from app.core.embedding.chunker import Chunk
 
-if TYPE_CHECKING:
-    pass
-
+log = structlog.get_logger()
 settings = get_settings()
 
 COLLECTION = "code_chunks"
-VECTOR_SIZE = 768  # text-embedding-004 output dimension
-
-genai.configure(api_key=settings.gemini_api_key)
+VECTOR_SIZE = 1024  # voyage-code-3 default output dimension
 
 _qdrant: QdrantClient | None = None
+_voyage: voyageai.Client | None = None
 
 
 def get_qdrant() -> QdrantClient:
@@ -35,6 +33,13 @@ def get_qdrant() -> QdrantClient:
         _qdrant = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
         _ensure_collection(_qdrant)
     return _qdrant
+
+
+def get_voyage() -> voyageai.Client:
+    global _voyage
+    if _voyage is None:
+        _voyage = voyageai.Client(api_key=settings.voyage_api_key)
+    return _voyage
 
 
 def _ensure_collection(client: QdrantClient) -> None:
@@ -46,15 +51,15 @@ def _ensure_collection(client: QdrantClient) -> None:
         )
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Call Gemini embedding API and return vectors."""
-    result = genai.embed_content(
-        model=settings.gemini_embedding_model,
-        content=texts,
-        task_type="RETRIEVAL_DOCUMENT",
-        output_dimensionality=VECTOR_SIZE
+def embed_texts(texts: list[str], input_type: str = "document") -> list[list[float]]:
+    """Call Voyage AI embedding API and return vectors."""
+    client = get_voyage()
+    result = client.embed(
+        texts,
+        model=settings.voyage_embedding_model,
+        input_type=input_type,
     )
-    return result["embedding"] if isinstance(result["embedding"][0], list) else [result["embedding"]]
+    return result.embeddings
 
 
 def upsert_chunks(chunks: list[Chunk]) -> None:
@@ -62,9 +67,9 @@ def upsert_chunks(chunks: list[Chunk]) -> None:
     if not chunks:
         return
 
-    client = get_qdrant()
+    qdrant = get_qdrant()
     texts = [c.text for c in chunks]
-    vectors = embed_texts(texts)
+    vectors = embed_texts(texts, input_type="document")
 
     points = [
         PointStruct(
@@ -84,26 +89,17 @@ def upsert_chunks(chunks: list[Chunk]) -> None:
         )
         for c, vec in zip(chunks, vectors)
     ]
-    client.upsert(collection_name=COLLECTION, points=points)
+    qdrant.upsert(collection_name=COLLECTION, points=points)
+    log.info("embedder.upserted", count=len(points))
 
 
-async def vector_search(
-    repo_id: str,
-    question: str,
-    top_k: int = 10,
-) -> list[dict]:
-    """Embed the query and search Qdrant. Returns list of payload dicts."""
-    client = get_qdrant()
+def _sync_vector_search(repo_id: str, question: str, top_k: int) -> list[dict]:
+    """Synchronous inner search — runs in a thread executor."""
+    qdrant = get_qdrant()
 
-    vec_result = genai.embed_content(
-        model=settings.gemini_embedding_model,
-        content=question,
-        task_type="RETRIEVAL_QUERY",
-        output_dimensionality=VECTOR_SIZE,
-    )
-    query_vec = vec_result["embedding"]
+    query_vec = embed_texts([question], input_type="query")[0]
 
-    hits = client.search(
+    hits = qdrant.search(
         collection_name=COLLECTION,
         query_vector=query_vec,
         limit=top_k,
@@ -112,15 +108,30 @@ async def vector_search(
         ),
         with_payload=True,
     )
-    return [hit.payload for hit in hits]
+    results = [hit.payload for hit in hits if hit.payload]
+    log.info("embedder.search", repo_id=repo_id, hits=len(results))
+    return results
+
+
+async def vector_search(
+    repo_id: str,
+    question: str,
+    top_k: int = 10,
+) -> list[dict]:
+    """Embed the query and search Qdrant. Runs blocking I/O in a thread."""
+    return await asyncio.get_event_loop().run_in_executor(
+        None, _sync_vector_search, repo_id, question, top_k
+    )
 
 
 def delete_repo_chunks(repo_id: str) -> None:
     """Remove all chunks for a repo from Qdrant."""
-    client = get_qdrant()
-    client.delete(
+    qdrant = get_qdrant()
+    qdrant.delete(
         collection_name=COLLECTION,
         points_selector=Filter(
             must=[FieldCondition(key="repo_id", match=MatchValue(value=repo_id))]
         ),
     )
+
+

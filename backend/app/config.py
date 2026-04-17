@@ -45,10 +45,13 @@ class Settings(BaseSettings):
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
 
-    # Gemini
+    # Gemini (LLM only)
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
-    gemini_embedding_model: str = "models/gemini-embedding-001"
     gemini_chat_model: str = "gemini-2.5-pro"
+
+    # Voyage AI (embeddings)
+    voyage_api_key: str = Field(default="", alias="VOYAGE_API_KEY")
+    voyage_embedding_model: str = "voyage-code-3"
 
     # GitHub
     github_token: str = ""
