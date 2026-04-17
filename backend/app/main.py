@@ -1,0 +1,124 @@
+from __future__ import annotations
+import asyncio
+import json
+import structlog
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
+
+from app.config import get_settings
+from app.database import create_db_and_tables
+from app.routers import repos, jobs, query, graph, annotations, files
+
+log = structlog.get_logger()
+settings = get_settings()
+
+# ─── WebSocket connection manager ─────────────────────────────────────────────
+
+class ConnectionManager:
+    def __init__(self):
+        self._connections: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, repo_id: str, ws: WebSocket):
+        await ws.accept()
+        self._connections.setdefault(repo_id, []).append(ws)
+
+    def disconnect(self, repo_id: str, ws: WebSocket):
+        if repo_id in self._connections:
+            self._connections[repo_id].discard(ws) if hasattr(
+                self._connections[repo_id], "discard"
+            ) else None
+            try:
+                self._connections[repo_id].remove(ws)
+            except ValueError:
+                pass
+
+    async def broadcast(self, repo_id: str, message: dict):
+        dead = []
+        for ws in self._connections.get(repo_id, []):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(repo_id, ws)
+
+
+manager = ConnectionManager()
+
+
+# ─── Redis pub/sub listener ───────────────────────────────────────────────────
+
+async def redis_listener():
+    """Subscribe to job progress events published by Celery workers and
+    forward them to the correct WebSocket connections."""
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    pubsub = redis.pubsub()
+    await pubsub.psubscribe("job:*")
+    log.info("Redis pub/sub listener started")
+    async for message in pubsub.listen():
+        if message["type"] != "pmessage":
+            continue
+        try:
+            data = json.loads(message["data"])
+            repo_id = data.get("repo_id")
+            if repo_id:
+                await manager.broadcast(repo_id, data)
+        except Exception as exc:
+            log.warning("redis_listener.parse_error", error=str(exc))
+
+
+# ─── Lifespan ─────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await create_db_and_tables()
+    task = asyncio.create_task(redis_listener())
+    log.info("YASML API started")
+    yield
+    task.cancel()
+    log.info("YASML API stopped")
+
+
+# ─── App ──────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="YASML — Codebase Intelligence API",
+    description="Ingest, graph, and query any codebase with natural language.",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ─── Routers ──────────────────────────────────────────────────────────────────
+
+app.include_router(repos.router,        prefix="/api/repos",       tags=["repos"])
+app.include_router(jobs.router,         prefix="/api/jobs",        tags=["jobs"])
+app.include_router(query.router,        prefix="/api/query",       tags=["query"])
+app.include_router(graph.router,        prefix="/api/graph",       tags=["graph"])
+app.include_router(annotations.router,  prefix="/api/annotations", tags=["annotations"])
+app.include_router(files.router,        prefix="/api/files",       tags=["files"])
+
+
+# ─── WebSocket endpoint ───────────────────────────────────────────────────────
+
+@app.websocket("/ws/{repo_id}")
+async def websocket_endpoint(websocket: WebSocket, repo_id: str):
+    await manager.connect(repo_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # keep-alive pings
+    except WebSocketDisconnect:
+        manager.disconnect(repo_id, websocket)
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": "0.1.0"}
