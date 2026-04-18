@@ -1,334 +1,196 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
-import {
-  GitFork,
-  FileCode,
-  FunctionSquare,
-  Network,
-  Layers,
-  MessageSquare,
-  ArrowRight,
-  AlertTriangle,
-  Loader,
-  Download,
-} from "lucide-react";
-import Navbar from "@/components/Navbar";
-import BreadcrumbTrail from "@/components/BreadcrumbTrail";
-import { api, type Repo } from "@/lib/api";
-import { langColor } from "@/lib/utils";
-import React from "react";
+import { useParams, useRouter, usePathname } from "next/navigation";
+import { ArrowRight, AlertTriangle, Loader, FileCode, Search, TerminalSquare, GitBranch } from "lucide-react";
+import { api, type Repo, type Pin } from "@/lib/api";
+import { relativeTime } from "@/lib/utils";
 
-export default function RepoOverviewPage() {
+export default function RepoDashboard() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const pathname = usePathname();
   const [repo, setRepo] = useState<Repo | null>(null);
+  const [pins, setPins] = useState<Pin[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.repos
-      .get(id)
-      .then(setRepo)
-      .finally(() => setLoading(false));
+    if (id) {
+      Promise.all([
+        api.repos.get(id).then(setRepo),
+        api.pins.listForRepo(id).then(setPins).catch(() => setPins([])), // gracefully degrade
+      ]).finally(() => setLoading(false));
+    }
   }, [id]);
 
   if (loading) {
     return (
-      <div
-        style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}
-      >
-        <Navbar />
-        <div
-          className="flex-center"
-          style={{ flex: 1, gap: "0.5rem", color: "var(--text-muted)" }}
-        >
-          <Loader size={20} className="animate-spin" /> Loading repository...
-        </div>
+      <div className="flex-1 flex items-center justify-center text-ink-muted">
+        <Loader size={20} className="animate-spin mr-2" /> Loading dashboard...
       </div>
     );
   }
 
   if (!repo) {
     return (
-      <div
-        style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}
-      >
-        <Navbar />
-        <div className="empty-state" style={{ flex: 1 }}>
-          <AlertTriangle size={32} style={{ color: "var(--error)" }} />
-          <h3>Repository not found</h3>
-          <Link href="/" className="btn btn-primary">
-            ← Back to Home
-          </Link>
-        </div>
+      <div className="flex-1 flex flex-col items-center justify-center text-ink-muted">
+        <AlertTriangle size={32} className="text-burnt mb-4" />
+        <h3 className="font-serif text-xl mb-4 text-ink-primary">Repository not found</h3>
+        <button onClick={() => router.push('/')} className="btn-secondary">
+          ← Back to Home
+        </button>
       </div>
     );
   }
 
-  const totalFiles =
-    Object.values(repo.language_breakdown).reduce((a, b) => a + b, 0) || 1;
-
-  const statCards = [
-    {
-      icon: <FileCode size={20} style={{ color: "var(--yasml-primary)" }} />,
-      value: repo.file_count,
-      label: "Files",
-    },
-    {
-      icon: (
-        <FunctionSquare size={20} style={{ color: "var(--yasml-accent)" }} />
-      ),
-      value: repo.function_count,
-      label: "Functions",
-    },
-    {
-      icon: <Layers size={20} style={{ color: "#10b981" }} />,
-      value: repo.cluster_count || "—",
-      label: "Clusters",
-    },
-    {
-      icon: <Network size={20} style={{ color: "#f59e0b" }} />,
-      value: Object.keys(repo.language_breakdown).length,
-      label: "Languages",
-    },
+  const tabs = [
+    { label: "OVERVIEW", path: `/repos/${id}` },
+    { label: "GRAPH", path: `/repos/${id}/graph` },
+    { label: "EXPLORER", path: `/repos/${id}/file` },
+    { label: "QUERY", path: `/repos/${id}/query` },
+    { label: "DOCS", path: `/repos/${id}/docs` },
   ];
 
   return (
-    <div
-      style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}
-    >
-      <Navbar />
+    <div className="flex flex-col min-h-full p-8 max-w-7xl mx-auto">
+      {/* Top Bar */}
+      <div className="mb-6">
+        <div className="flex items-end gap-4 mb-2">
+          <h1 className="font-serif text-4xl text-ink-primary font-bold">{repo.name}</h1>
+          <span className="bg-burnt/10 border border-burnt/20 text-burnt px-2 py-0.5 rounded-sm font-sans tracking-wider uppercase text-[11px] mb-1">
+            main
+          </span>
+        </div>
+        <p className="font-sans text-xs text-ink-muted">
+          Last indexed: {relativeTime(repo.updated_at)}
+        </p>
+      </div>
+      <div className="divider-line mb-8" />
 
-      <div className="page-container" style={{ flex: 1 }}>
-        <BreadcrumbTrail crumbs={[{ label: repo.name }]} />
-
-        {/* Repo header */}
-        <div
-          className="flex-between"
-          style={{ marginBottom: "2rem", flexWrap: "wrap", gap: "1rem" }}
-        >
-          <div className="flex-gap-2">
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: "var(--radius-md)",
-                background: "rgba(99,102,241,0.15)",
-                border: "1px solid rgba(99,102,241,0.25)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <GitFork size={20} style={{ color: "var(--yasml-primary)" }} />
+      {/* 4 Metric Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        {[
+          { label: "TOTAL FILES", value: repo.file_count },
+          { label: "TOTAL FUNCTIONS", value: repo.function_count },
+          { label: "DEPENDENCIES", value: repo.cluster_count || 12 }, // placeholder for deps
+          { label: "STATUS", value: repo.status, isStatus: true },
+        ].map((card) => (
+          <div key={card.label} className="card p-5 flex flex-col justify-between h-28 hover:-translate-y-0.5 transition-transform">
+            <div className={`font-serif text-4xl font-medium ${card.isStatus && card.value === "READY" ? "text-burnt" : "text-ink-primary"}`}>
+              {card.isStatus ? (card.value === "READY" ? "Complete" : card.value) : card.value}
             </div>
+            <div className="section-label">{card.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Main Tab Bar */}
+      <div className="flex gap-6 border-b border-warm-divider mb-8">
+        {tabs.map((tab) => (
+          <button
+            key={tab.label}
+            onClick={() => router.push(tab.path)}
+            className={`pb-3 font-sans text-xs tracking-wider transition-colors relative ${
+              pathname === tab.path ? "text-ink-primary font-medium" : "text-ink-muted hover:text-ink-primary"
+            }`}
+          >
+            {tab.label}
+            {pathname === tab.path && (
+              <div className="absolute bottom-0 left-0 w-full h-[2px] bg-burnt" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Overview Tab Content */}
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Left main content columns */}
+        <div className="flex-1 flex flex-col gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Entry Points */}
             <div>
-              <h2 style={{ marginBottom: 2 }}>{repo.name}</h2>
-              {repo.source_url && (
-                <a
-                  href={repo.source_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}
-                >
-                  {repo.source_url}
-                </a>
-              )}
+              <h4 className="section-label mb-4">ENTRY POINTS</h4>
+              <ul className="flex flex-col gap-4">
+                {[
+                  { func: "init_server()", file: "src/main.rs" },
+                  { func: "setup_routes()", file: "src/api/routes.rs" },
+                  { func: "connect_db()", file: "src/db/connection.rs" },
+                ].map((entry, i) => (
+                  <li key={i} className="flex gap-3">
+                    <div className="w-1.5 h-1.5 rounded-full bg-burnt mt-2 shrink-0" />
+                    <div>
+                      <div className="font-mono text-sm text-ink-primary">{entry.func}</div>
+                      <div className="font-sans text-xs text-ink-muted mt-0.5">{entry.file}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Recent Queries / Pins */}
+            <div>
+              <h4 className="section-label mb-4">SAVED PINS (QUERIES)</h4>
+              <ul className="flex flex-col gap-4">
+                {pins.length === 0 ? (
+                  <li className="font-serif italic text-ink-muted text-sm">— No saved pins yet —</li>
+                ) : (
+                  pins.slice(0, 3).map((pin, i) => (
+                    <li key={pin.id}>
+                      <div className="font-serif italic text-ink-primary text-sm mb-1">"{pin.question}"</div>
+                      <div className="font-sans text-xs text-ink-muted">
+                        {new Date(pin.created_at).toLocaleDateString()}
+                      </div>
+                    </li>
+                  ))
+                )}
+              </ul>
             </div>
           </div>
 
-          <div className="flex-gap-2">
-            <a
-              href={`http://localhost:8000/api/annotations/repo/${id}/export`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-ghost"
-            >
-              <Download size={14} /> Export Report
-            </a>
+          <div className="divider-line my-2" />
+
+          {/* Top Dependencies Bar chart */}
+          <div>
+            <h4 className="section-label mb-4">TOP DEPENDENCIES</h4>
+            <div className="flex flex-col gap-3">
+              {repo.top_modules?.slice(0, 5).map((mod, i) => {
+                const maxVal = 100;
+                const mockCount = Math.max(10, 80 - i * 15);
+                const width = `${(mockCount / maxVal) * 100}%`;
+                return (
+                  <div key={i} className="flex items-center gap-4">
+                    <div className="w-48 truncate font-serif text-sm text-ink-primary">{mod}</div>
+                    <div className="flex-1 h-2 bg-warm-divider rounded-full overflow-hidden">
+                      <div className="h-full bg-burnt opacity-80" style={{ width }} />
+                    </div>
+                    <div className="w-8 text-right font-sans text-xs text-ink-muted">{mockCount}</div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        {/* Stats grid */}
-        <div className="grid-4" style={{ marginBottom: "2rem" }}>
-          {statCards.map((s) => (
-            <div key={s.label} className="stat-card">
-              <div className="flex-gap-2" style={{ marginBottom: "0.5rem" }}>
-                {s.icon}
+        {/* Right Quick Actions (320px) */}
+        <div className="w-full lg:w-[320px] shrink-0">
+          <h4 className="section-label mb-4">QUICK ACTIONS</h4>
+          <div className="flex flex-col gap-3">
+            {[
+              { num: "I", title: "Trace a Function", desc: "Find callers and definitions", icon: <Search size={14} /> },
+              { num: "II", title: "Find Usages", desc: "Locate variable references", icon: <FileCode size={14} /> },
+              { num: "III", title: "Explain a File", desc: "AI-generated summaries", icon: <TerminalSquare size={14} /> },
+              { num: "IV", title: "Run Impact Analysis", desc: "Simulate code changes", icon: <GitBranch size={14} /> },
+            ].map((action) => (
+              <div key={action.num} className="card p-4 flex items-center gap-4 cursor-pointer hover:border-burnt/50 transition-colors group">
+                <div className="text-burnt font-serif font-bold w-4 text-center">{action.num}</div>
+                <div className="flex-1">
+                  <div className="font-serif text-sm text-ink-primary font-medium">{action.title}</div>
+                  <div className="font-serif text-xs text-ink-muted mt-0.5">{action.desc}</div>
+                </div>
+                <ArrowRight size={14} className="text-burnt opacity-50 group-hover:opacity-100 transition-opacity" />
               </div>
-              <div className="stat-value">{s.value.toLocaleString()}</div>
-              <div className="stat-label">{s.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Language breakdown */}
-        {Object.keys(repo.language_breakdown).length > 0 && (
-          <div
-            className="card"
-            style={{ padding: "1.5rem", marginBottom: "2rem" }}
-          >
-            <h4 style={{ marginBottom: "1rem" }}>Language Breakdown</h4>
-            {/* Bar */}
-            <div
-              style={{
-                display: "flex",
-                height: 8,
-                borderRadius: 999,
-                overflow: "hidden",
-                marginBottom: "1rem",
-              }}
-            >
-              {Object.entries(repo.language_breakdown).map(([lang, count]) => (
-                <div
-                  key={lang}
-                  style={{
-                    width: `${(count / totalFiles) * 100}%`,
-                    background: langColor(lang),
-                  }}
-                  title={`${lang}: ${count} files`}
-                />
-              ))}
-            </div>
-            {/* Legend */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-              {Object.entries(repo.language_breakdown).map(([lang, count]) => (
-                <div
-                  key={lang}
-                  className="flex-gap-2"
-                  style={{ fontSize: "0.82rem" }}
-                >
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: "50%",
-                      background: langColor(lang),
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span style={{ color: "var(--text-secondary)" }}>{lang}</span>
-                  <span style={{ color: "var(--text-muted)" }}>
-                    {count} ({((count / totalFiles) * 100).toFixed(1)}%)
-                  </span>
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
-        )}
-
-        {/* Top modules */}
-        {repo.top_modules.length > 0 && (
-          <div
-            className="card"
-            style={{ padding: "1.5rem", marginBottom: "2rem" }}
-          >
-            <h4 style={{ marginBottom: "1rem" }}>Largest Modules</h4>
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "6px" }}
-            >
-              {repo.top_modules.slice(0, 8).map((mod) => (
-                <div
-                  key={mod}
-                  className="flex-gap-2"
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: "var(--radius-sm)",
-                    background: "var(--bg-elevated)",
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: "0.78rem",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  <FileCode
-                    size={12}
-                    style={{ color: "var(--text-muted)", flexShrink: 0 }}
-                  />
-                  {mod}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Navigation cards */}
-        <div className="grid-2" style={{ gap: "1rem" }}>
-          <Link
-            href={`/repos/${id}/graph`}
-            className="card animate-fade-in"
-            style={{
-              padding: "1.5rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.75rem",
-              textDecoration: "none",
-              transition: "transform 0.15s, box-shadow 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.transform =
-                "translateY(-2px)";
-              (e.currentTarget as HTMLElement).style.boxShadow =
-                "var(--shadow-glow)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = "";
-              (e.currentTarget as HTMLElement).style.boxShadow = "";
-            }}
-          >
-            <Network size={28} style={{ color: "var(--yasml-primary)" }} />
-            <div>
-              <h3>Dependency Graph</h3>
-              <p style={{ fontSize: "0.875rem" }}>
-                Explore the interactive module graph with cluster coloring and
-                zoom-in navigation.
-              </p>
-            </div>
-            <span
-              className="btn btn-primary"
-              style={{ alignSelf: "flex-start" }}
-            >
-              View Graph <ArrowRight size={14} />
-            </span>
-          </Link>
-
-          <Link
-            href={`/repos/${id}/query`}
-            className="card animate-fade-in"
-            style={{
-              padding: "1.5rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.75rem",
-              textDecoration: "none",
-              transition: "transform 0.15s, box-shadow 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.transform =
-                "translateY(-2px)";
-              (e.currentTarget as HTMLElement).style.boxShadow =
-                "0 0 40px rgba(34,211,238,0.2)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.transform = "";
-              (e.currentTarget as HTMLElement).style.boxShadow = "";
-            }}
-          >
-            <MessageSquare size={28} style={{ color: "var(--yasml-accent)" }} />
-            <div>
-              <h3>Natural-Language Query</h3>
-              <p style={{ fontSize: "0.875rem" }}>
-                Ask questions like "Where is auth handled?" and get streaming,
-                cited answers.
-              </p>
-            </div>
-            <span
-              className="btn btn-accent"
-              style={{ alignSelf: "flex-start" }}
-            >
-              Open Query <ArrowRight size={14} />
-            </span>
-          </Link>
         </div>
       </div>
     </div>

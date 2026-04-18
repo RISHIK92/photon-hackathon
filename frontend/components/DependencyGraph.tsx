@@ -1,98 +1,130 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   useNodesState,
   useEdgesState,
   type Node,
   type Edge,
   MarkerType,
-  Panel,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { GraphData, GraphNode } from "@/lib/api";
-import { langColor } from "@/lib/utils";
-import React from "react";
 
-// ─── Cluster colour palette ───────────────────────────────────────────────────
-const COMMUNITY_COLORS = [
-  "#6366f1",
-  "#22d3ee",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#8b5cf6",
-  "#ec4899",
-  "#06b6d4",
-  "#84cc16",
-  "#f97316",
-];
-
-function communityColor(id: number): string {
-  return COMMUNITY_COLORS[id % COMMUNITY_COLORS.length];
-}
-
-function buildReactFlowGraph(data: GraphData): {
-  nodes: Node[];
-  edges: Edge[];
-} {
-  const nodes: Node[] = data.nodes.map((n: GraphNode) => ({
-    id: n.id,
-    type: "default",
-    position: { x: (n.x ?? 0) * 3, y: (n.y ?? 0) * 3 },
-    data: {
-      label: n.label || n.path.split("/").pop(),
-      node: n,
-    },
-    style: {
-      background: "var(--bg-card)",
-      border: `2px solid ${n.community !== undefined ? communityColor(n.community) : langColor(n.language)}`,
-      borderRadius: 8,
-      color: "var(--text-primary)",
-      fontSize: 11,
-      fontFamily: "'JetBrains Mono', monospace",
-      padding: "6px 10px",
-      minWidth: 90,
-      boxShadow: `0 0 12px ${n.community !== undefined ? communityColor(n.community) : "transparent"}22`,
-    },
-  }));
-
-  const edges: Edge[] = data.edges.map((e, i) => ({
-    id: `e-${i}-${e.source}-${e.target}`,
-    source: e.source,
-    target: e.target,
-    label: e.type,
-    labelStyle: { fontSize: 9, fill: "var(--text-muted)" },
-    style: { stroke: "rgba(255,255,255,0.12)", strokeWidth: 1.5 },
-    markerEnd: { type: MarkerType.ArrowClosed, color: "rgba(255,255,255,0.2)" },
-    animated: false,
-  }));
-
-  return { nodes, edges };
+function inferNodeType(label: string): "function" | "class" | "file" {
+  if (label.includes("()")) return "function";
+  if (/[A-Z]/.test(label[0]) && !label.includes(".")) return "class";
+  return "file";
 }
 
 interface DependencyGraphProps {
   data: GraphData;
   onNodeClick?: (node: GraphNode) => void;
+  selectedNodeId?: string;
 }
 
 export default function DependencyGraph({
   data,
   onNodeClick,
+  selectedNodeId,
 }: DependencyGraphProps) {
-  const { nodes: initNodes, edges: initEdges } = buildReactFlowGraph(data);
-  const [nodes, setNodes, onNodesChange] = useNodesState(initNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initEdges);
+  // Memoize build to accept selectedNodeId for opacity tracking
+  const { initialNodes, initialEdges } = useMemo(() => {
+    // Determine connected nodes if a node relies on selection
+    const connectedEdges = data.edges.filter(e => e.source === selectedNodeId || e.target === selectedNodeId);
+    const connectedNodeIds = new Set<string>();
+    if (selectedNodeId) {
+      connectedNodeIds.add(selectedNodeId);
+      connectedEdges.forEach(e => {
+        connectedNodeIds.add(e.source);
+        connectedNodeIds.add(e.target);
+      });
+    }
+
+    const n: Node[] = data.nodes.map((gn) => {
+      const isSelected = selectedNodeId === gn.id;
+      const isConnected = selectedNodeId ? connectedNodeIds.has(gn.id) : true;
+      const opacity = isConnected ? 1 : 0.2;
+      
+      const type = inferNodeType(gn.label || gn.path);
+      let background = type === "file" ? "#E6DFD3" : "#EDE8DE";
+      let border = type === "file" ? "1px solid #9E9488" : "1.5px solid #C4621D";
+      let borderRadius = type === "file" ? "8px" : "50%";
+      let color = "#2C2826";
+      
+      if (type === "class") {
+        border = "3px double #C4621D";
+      }
+
+      if (isSelected) {
+        background = "rgba(196,98,29,0.15)";
+      }
+
+      return {
+        id: gn.id,
+        type: "default",
+        position: { x: (gn.x ?? 0) * 3, y: (gn.y ?? 0) * 3 },
+        data: { label: gn.label || gn.path.split("/").pop(), node: gn },
+        style: {
+          background,
+          border,
+          borderRadius,
+          color,
+          fontSize: 10,
+          fontFamily: "'Playfair Display', 'Cormorant Garamond', serif",
+          padding: type === "file" ? "6px 12px" : "10px 10px",
+          textAlign: "center",
+          opacity,
+          transition: "all 0.2s ease",
+          minWidth: type === "function" || type === "class" ? 50 : 80,
+          aspectRatio: type !== "file" ? "1/1" : "auto",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center"
+        },
+      };
+    });
+
+    const e: Edge[] = data.edges.map((edge, i) => {
+      const isConnected = selectedNodeId ? (edge.source === selectedNodeId || edge.target === selectedNodeId) : true;
+      const opacity = isConnected ? 1 : 0.1;
+      
+      let strokeDasharray = "none";
+      let stroke = "#C4621D"; // default CALLS
+      
+      if (edge.type === "imports" || edge.type === "IMPORTS") {
+        stroke = "#9E9488";
+        strokeDasharray = "4 4";
+      } else if (edge.type === "defines" || edge.type === "DEFINES") {
+        strokeDasharray = "2 4";
+        opacity === 1 ? 0.6 : 0.1;
+      }
+
+      return {
+        id: `e-${i}-${edge.source}-${edge.target}`,
+        source: edge.source,
+        target: edge.target,
+        label: isConnected ? edge.type : "",
+        labelStyle: { fontSize: 8, fill: "#7A7066", fontFamily: 'sans-serif' },
+        style: { stroke, strokeWidth: isConnected ? 1.5 : 1, strokeDasharray, opacity, transition: "opacity 0.2s ease" },
+        markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
+        animated: false,
+      };
+    });
+
+    return { initialNodes: n, initialEdges: e };
+  }, [data, selectedNodeId]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
   useEffect(() => {
-    const { nodes: n, edges: e } = buildReactFlowGraph(data);
-    setNodes(n);
-    setEdges(e);
-  }, [data]);
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -101,22 +133,8 @@ export default function DependencyGraph({
     [onNodeClick],
   );
 
-  // Build legend from unique communities
-  const usedCommunities = [
-    ...new Set(
-      data.nodes.map((n) => n.community).filter((c) => c !== undefined),
-    ),
-  ] as number[];
-
   return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        borderRadius: "var(--radius-lg)",
-        overflow: "hidden",
-      }}
-    >
+    <div className="w-full h-full rounded-md overflow-hidden bg-[#F0EBE1]">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -127,76 +145,9 @@ export default function DependencyGraph({
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.05}
         maxZoom={3}
-        attributionPosition="bottom-left"
       >
-        <Background color="rgba(255,255,255,0.03)" gap={32} />
-        <Controls
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--bg-card-border)",
-            borderRadius: "var(--radius-md)",
-          }}
-        />
-        <MiniMap
-          nodeColor={(n: Node) => {
-            const gn = n.data.node as GraphNode;
-            return gn.community !== undefined
-              ? communityColor(gn.community)
-              : langColor(gn.language);
-          }}
-          style={{
-            background: "var(--bg-base)",
-            border: "1px solid var(--bg-card-border)",
-            borderRadius: "var(--radius-md)",
-          }}
-        />
-
-        {/* Legend panel */}
-        {usedCommunities.length > 0 && (
-          <Panel position="top-right">
-            <div
-              className="card"
-              style={{ padding: "0.75rem 1rem", minWidth: 140 }}
-            >
-              <p
-                style={{
-                  fontSize: "0.72rem",
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  color: "var(--text-muted)",
-                  marginBottom: "0.5rem",
-                }}
-              >
-                Clusters
-              </p>
-              {usedCommunities.slice(0, 8).map((c) => (
-                <div
-                  key={c}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: "0.78rem",
-                    marginBottom: 4,
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: "50%",
-                      background: communityColor(c),
-                      flexShrink: 0,
-                    }}
-                  />
-                  Cluster {c + 1}
-                </div>
-              ))}
-            </div>
-          </Panel>
-        )}
+        <Background color="#E6DFD3" gap={32} size={1} />
+        <Controls showInteractive={false} className="bg-warm-secondary border border-warm-divider shadow-sm rounded-sm" />
       </ReactFlow>
     </div>
   );

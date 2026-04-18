@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Send, Zap, BookOpen, X, Pin, ChevronDown } from "lucide-react";
+import { Send, ThumbsUp, ThumbsDown, Network } from "lucide-react";
 import { api, type CitedChunk, type Pin as PinType } from "@/lib/api";
 import { readSSE } from "@/lib/sse";
-import React from "react";
 
 interface Message {
   role: "user" | "assistant";
@@ -16,40 +15,31 @@ interface Message {
 
 interface QueryPanelProps {
   repoId: string;
-  onCitationClick?: (chunk: CitedChunk) => void;
-  onPin?: (pin: PinType) => void;
 }
 
 const SUGGESTED_QUESTIONS = [
-  "Where is authentication handled?",
-  "What are the main entry points?",
-  "How does the data flow from API to database?",
-  "Which modules have the most dependencies?",
+  "Explain the login flow",
+  "Where is validate_user called?",
+  "What does AuthService depend on?",
+  "What breaks if I change db_query?",
 ];
 
-export default function QueryPanel({
-  repoId,
-  onCitationClick,
-  onPin,
-}: QueryPanelProps) {
+export default function QueryPanel({ repoId }: QueryPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    // Scroll to bottom when messages update
+    if (messages.length > 0) {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }
   }, [messages]);
 
   const sendQuestion = useCallback(
     async (question: string) => {
       if (!question.trim() || streaming) return;
-      setError(null);
       setInput("");
 
       const userMsg: Message = { role: "user", text: question };
@@ -60,8 +50,7 @@ export default function QueryPanel({
       setStreaming(true);
 
       try {
-        const sessionId =
-          messages.find((m) => m.sessionId)?.sessionId ?? undefined;
+        const sessionId = messages.find((m) => m.sessionId)?.sessionId ?? undefined;
         const res = await api.query.stream({
           repo_id: repoId,
           question,
@@ -92,12 +81,11 @@ export default function QueryPanel({
           }
         }
       } catch (err) {
-        setError((err as Error).message);
         setMessages((prev) => {
           const updated = [...prev];
           updated[updated.length - 1] = {
             ...updated[updated.length - 1],
-            text: "⚠ Failed to get a response. Check that the backend is running.",
+            text: "Failed to get a response. Check that the backend is running.",
           };
           return updated;
         });
@@ -105,242 +93,169 @@ export default function QueryPanel({
         setStreaming(false);
       }
     },
-    [repoId, messages, streaming],
+    [repoId, messages, streaming]
   );
 
-  async function handlePin(msg: Message) {
-    if (!msg.sessionId) return;
-    try {
-      const pin = await api.pins.create({
-        repo_id: repoId,
-        module_node_id: msg.chunks?.[0]?.id ?? "unknown",
-        question: messages[messages.indexOf(msg) - 1]?.text ?? "",
-        answer: msg.text,
-        cited_refs: msg.chunks ?? [],
-      });
-      onPin?.(pin);
-    } catch (e) {
-      console.error("pin failed:", e);
-    }
-  }
-
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        minHeight: 0,
-      }}
-    >
-      {/* Message list */}
-      <div
-        ref={scrollRef}
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "1rem",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1rem",
-        }}
-      >
-        {messages.length === 0 && (
-          <div className="empty-state">
-            <Zap
-              size={36}
-              style={{ color: "var(--yasml-primary)", opacity: 0.6 }}
-            />
-            <h3>Ask anything about this codebase</h3>
-            <p style={{ fontSize: "0.875rem", maxWidth: 360 }}>
-              YASML uses hybrid graph + semantic search to find relevant code
-              and answer precisely.
-            </p>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "0.5rem",
-                justifyContent: "center",
-                marginTop: "0.5rem",
-              }}
-            >
-              {SUGGESTED_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => sendQuestion(q)}
-                  style={{
-                    padding: "0.4rem 0.9rem",
-                    borderRadius: "999px",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    background: "var(--bg-elevated)",
-                    color: "var(--text-secondary)",
-                    fontSize: "0.8rem",
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "var(--yasml-primary)";
-                    e.currentTarget.style.color = "var(--text-primary)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
-                    e.currentTarget.style.color = "var(--text-secondary)";
-                  }}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+    <div className="flex flex-col gap-12" ref={scrollRef}>
+      {messages.length === 0 && (
+        <div className="animate-fade-in text-center flex flex-col items-center">
+          <p className="section-label mb-6">QUERY</p>
+          <h1 className="text-4xl md:text-5xl font-serif text-ink-primary font-medium mb-4">
+            <span className="italic text-burnt">Ask</span> anything about your codebase.
+          </h1>
+          <p className="font-serif text-lg text-ink-muted mb-10">
+            Trace flows, find usages, understand dependencies — in plain language.
+          </p>
 
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: msg.role === "user" ? "flex-end" : "flex-start",
-              gap: "0.4rem",
-            }}
-          >
-            {msg.intent && (
-              <span
-                className="badge badge-ingesting"
-                style={{ alignSelf: "flex-start", marginBottom: 2 }}
-              >
-                {msg.intent}
-              </span>
-            )}
-
-            <div className={`chat-bubble ${msg.role}`}>
-              {msg.text ||
-                (streaming && i === messages.length - 1 ? (
-                  <span style={{ opacity: 0.6 }}>
-                    Thinking<span className="cursor-blink">▋</span>
-                  </span>
-                ) : null)}
-            </div>
-
-            {/* Citations */}
-            {msg.chunks && msg.chunks.length > 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "4px",
-                  maxWidth: "85%",
-                }}
-              >
-                {msg.chunks.map((chunk, ci) => (
-                  <button
-                    key={ci}
-                    className="citation"
-                    onClick={() => onCitationClick?.(chunk)}
-                    title={`${chunk.path ?? chunk.file_path ?? ""}:${chunk.start_line}-${chunk.end_line}`}
-                  >
-                    <BookOpen size={11} />
-                    {(chunk.path ?? chunk.file_path ?? "").split("/").pop()}:
-                    {chunk.start_line}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Pin button for assistant messages */}
-            {msg.role === "assistant" && msg.text && !streaming && (
+          <div className="flex flex-wrap gap-3 justify-center mb-12 max-w-2xl">
+            {SUGGESTED_QUESTIONS.map((q) => (
               <button
-                onClick={() => handlePin(msg)}
-                style={{
-                  alignSelf: "flex-start",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  fontSize: "0.75rem",
-                  color: "var(--text-muted)",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "2px 6px",
-                  borderRadius: "var(--radius-sm)",
-                  transition: "color 0.15s",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.color = "var(--yasml-accent)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.color = "var(--text-muted)")
-                }
+                key={q}
+                onClick={() => sendQuestion(q)}
+                className="bg-warm-secondary border border-warm-divider rounded-full px-5 py-2 font-serif italic text-ink-muted hover:text-ink-primary hover:border-burnt transition-colors text-sm"
               >
-                <Pin size={11} /> Pin to graph
+                "{q}"
               </button>
-            )}
+            ))}
           </div>
-        ))}
 
-        {error && (
-          <div
-            style={{
-              color: "var(--error)",
-              fontSize: "0.8rem",
-              padding: "0.5rem",
-            }}
-          >
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* Input bar */}
-      <div
-        style={{
-          borderTop: "1px solid var(--bg-card-border)",
-          padding: "0.875rem 1rem",
-          display: "flex",
-          gap: "0.5rem",
-          alignItems: "flex-end",
-        }}
-      >
-        <textarea
-          id="query-input"
-          className="input"
-          placeholder="Ask a question about this codebase..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              sendQuestion(input);
-            }
-          }}
-          rows={2}
-          style={{ resize: "none", flex: 1 }}
-        />
-        <button
-          id="send-query-btn"
-          className="btn btn-primary"
-          onClick={() => sendQuestion(input)}
-          disabled={!input.trim() || streaming}
-          style={{ flexShrink: 0, height: 42 }}
-        >
-          {streaming ? (
-            <span
-              className="animate-spin"
-              style={{
-                display: "inline-block",
-                width: 15,
-                height: 15,
-                border: "2px solid rgba(255,255,255,0.3)",
-                borderTopColor: "#fff",
-                borderRadius: "50%",
+          <div className="w-full relative shadow-sm rounded-md">
+            <textarea
+              className="w-full bg-warm-primary border border-warm-divider rounded-md focus:border-burnt focus:ring-1 focus:ring-burnt outline-none p-5 pb-16 font-serif text-ink-primary text-lg resize-none placeholder:text-ink-muted/50 transition-colors"
+              placeholder="How are payments verified?"
+              rows={3}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendQuestion(input);
+                }
               }}
             />
-          ) : (
-            <Send size={15} />
-          )}
-        </button>
-      </div>
+            <button
+              onClick={() => sendQuestion(input)}
+              disabled={!input.trim() || streaming}
+              className="absolute bottom-4 right-4 bg-burnt text-warm-primary px-5 py-2 rounded-sm font-serif font-medium hover:bg-burnt-hover disabled:opacity-50 transition-colors flex items-center gap-2"
+            >
+              Ask &rarr;
+            </button>
+          </div>
+          
+          <div className="flex w-full items-center justify-start gap-4 mt-3">
+            {["Include code snippets", "Deep trace", "Show graph"].map((toggle) => (
+              <label key={toggle} className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" className="accent-burnt rounded-sm" defaultChecked={toggle === "Include code snippets"} />
+                <span className="font-sans text-[11px] uppercase tracking-wider text-ink-muted">{toggle}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {messages.length > 0 && (
+        <div className="flex flex-col gap-16 pb-24 animate-fade-in">
+          {messages.map((msg, i) => {
+            if (msg.role === "user") {
+              return (
+                <div key={i} className="bg-warm-secondary border-l-4 border-burnt p-6 rounded-r-md">
+                  <p className="font-serif italic text-ink-primary text-xl">"{msg.text}"</p>
+                </div>
+              );
+            }
+
+            // Assistant message
+            return (
+              <div key={i} className="flex flex-col gap-10">
+                {/* FLOW TRACE */}
+                {msg.chunks && msg.chunks.length > 0 && (
+                  <div>
+                    <h4 className="section-label mb-6">FLOW TRACE</h4>
+                    <div className="flex flex-col gap-6 relative">
+                      {/* Vertical line connector */}
+                      <div className="absolute left-[11px] top-6 bottom-6 w-px bg-warm-divider z-0" />
+                      
+                      {msg.chunks.map((chunk, ci) => (
+                        <div key={ci} className="relative z-10 flex gap-4">
+                          <div className="w-6 h-6 flex items-center justify-center bg-warm-secondary border border-warm-divider rounded-full font-sans text-[10px] text-ink-primary mt-1 shrink-0">
+                            {ci + 1}
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <span className="font-mono text-burnt text-sm cursor-pointer hover:underline">
+                              {chunk.symbol_name || "Code Segment"}
+                            </span>
+                            <span className="font-sans text-[11px] text-ink-muted">
+                              {chunk.path || chunk.file_path}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* GRAPH CONTEXT (Mocked) */}
+                {msg.chunks && msg.chunks.length > 0 && (
+                  <div>
+                    <h4 className="section-label mb-4">GRAPH CONTEXT</h4>
+                    <div className="border border-warm-divider rounded-md bg-[#F0EBE1] h-48 flex items-center justify-center relative overflow-hidden group cursor-pointer">
+                      <Network size={32} strokeWidth={1} className="text-burnt opacity-50" />
+                      <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                         <span className="text-burnt font-serif font-medium bg-warm-primary px-3 py-1 rounded-sm border border-burnt/30 shadow-sm">
+                           Open in Graph Explorer &rarr;
+                         </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* EXPLANATION */}
+                <div>
+                  <h4 className="section-label mb-4">EXPLANATION</h4>
+                  <div className="font-serif text-ink-primary text-lg leading-relaxed whitespace-pre-wrap">
+                    {msg.text || (streaming && i === messages.length - 1 ? "Thinking..." : "")}
+                  </div>
+                </div>
+
+                {/* Feedback */}
+                {!streaming && msg.text && (
+                  <div className="flex items-center gap-3 mt-4">
+                    <span className="text-sm font-sans text-ink-muted mr-2">Was this helpful?</span>
+                    <button className="p-1.5 border border-warm-divider rounded-sm text-ink-muted hover:text-burnt hover:border-burnt transition-colors"><ThumbsUp size={14}/></button>
+                    <button className="p-1.5 border border-warm-divider rounded-sm text-ink-muted hover:text-burnt hover:border-burnt transition-colors"><ThumbsDown size={14}/></button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Fixed bottom input for followups */}
+          <div className="fixed bottom-0 left-[260px] right-0 bg-warm-primary border-t border-warm-divider p-6 z-20 shadow-[0_-10px_40px_rgba(245,240,232,0.8)]">
+            <div className="max-w-[760px] mx-auto relative flex items-center">
+              <input
+                className="w-full bg-warm-secondary border border-warm-divider rounded-full focus:border-burnt outline-none px-6 py-3 font-serif text-ink-primary pr-32 placeholder:text-ink-muted transition-colors"
+                placeholder="Ask a follow-up question..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendQuestion(input);
+                  }
+                }}
+              />
+              <button
+                onClick={() => sendQuestion(input)}
+                disabled={!input.trim() || streaming}
+                className="absolute right-2 top-1.5 bottom-1.5 bg-burnt text-warm-primary px-4 rounded-full font-serif font-medium hover:bg-burnt-hover disabled:opacity-50 transition-colors flex items-center"
+              >
+                 <Send size={14} className="mr-2" /> Ask
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
