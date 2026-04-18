@@ -14,6 +14,9 @@ import {
 import { api, type Repo, type Job, type Pin, type EntryPoint } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
 import IngestionProgress from "@/components/IngestionProgress";
+import QuickActionModal, {
+  type QuickActionType,
+} from "@/components/QuickActionModal";
 import React from "react";
 
 export default function RepoDashboard() {
@@ -25,6 +28,8 @@ export default function RepoDashboard() {
   const [pins, setPins] = useState<Pin[]>([]);
   const [entryPoints, setEntryPoints] = useState<EntryPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeQuickAction, setActiveQuickAction] =
+    useState<QuickActionType | null>(null);
 
   const refreshRepo = useCallback(async () => {
     if (!id) return;
@@ -208,6 +213,7 @@ export default function RepoDashboard() {
     { label: "GRAPH", path: `/repos/${id}/graph` },
     { label: "EXPLORER", path: `/repos/${id}/file` },
     { label: "QUERY", path: `/repos/${id}/query` },
+    { label: "ONBOARDING", path: `/repos/${id}/onboarding` },
     { label: "DOCS", path: `/repos/${id}/docs` },
   ];
 
@@ -333,29 +339,6 @@ export default function RepoDashboard() {
                 )}
               </ul>
             </div>
-
-            {/* Recent Queries / Pins */}
-            <div>
-              <h4 className="section-label mb-4">SAVED PINS (QUERIES)</h4>
-              <ul className="flex flex-col gap-4">
-                {pins.length === 0 ? (
-                  <li className="font-serif italic text-ink-muted text-sm">
-                    — No saved pins yet —
-                  </li>
-                ) : (
-                  pins.slice(0, 3).map((pin, i) => (
-                    <li key={pin.id}>
-                      <div className="font-serif italic text-ink-primary text-sm mb-1">
-                        "{pin.question}"
-                      </div>
-                      <div className="font-sans text-xs text-ink-muted">
-                        {new Date(pin.created_at).toLocaleDateString()}
-                      </div>
-                    </li>
-                  ))
-                )}
-              </ul>
-            </div>
           </div>
 
           <div className="divider-line my-2" />
@@ -395,54 +378,68 @@ export default function RepoDashboard() {
           <div className="flex flex-col gap-3">
             {[
               {
+                action: "trace" as QuickActionType,
                 num: "I",
                 title: "Trace a Function",
                 desc: "Find callers and definitions",
                 icon: <Search size={14} />,
               },
               {
+                action: "usages" as QuickActionType,
                 num: "II",
                 title: "Find Usages",
                 desc: "Locate variable references",
                 icon: <FileCode size={14} />,
               },
               {
+                action: "explain" as QuickActionType,
                 num: "III",
                 title: "Explain a File",
                 desc: "AI-generated summaries",
                 icon: <TerminalSquare size={14} />,
               },
               {
+                action: "impact" as QuickActionType,
                 num: "IV",
                 title: "Run Impact Analysis",
                 desc: "Simulate code changes",
                 icon: <GitBranch size={14} />,
               },
-            ].map((action) => (
-              <div
-                key={action.num}
-                className="card p-4 flex items-center gap-4 cursor-pointer hover:border-burnt/50 transition-colors group"
+            ].map((a) => (
+              <button
+                key={a.action}
+                onClick={() => setActiveQuickAction(a.action)}
+                className="card p-4 flex items-center gap-4 cursor-pointer hover:border-burnt/50 transition-colors group text-left w-full"
               >
-                <div className="text-burnt font-serif font-bold w-4 text-center">
-                  {action.num}
+                <div className="text-burnt font-serif font-bold w-4 text-center shrink-0">
+                  {a.num}
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div className="font-serif text-sm text-ink-primary font-medium">
-                    {action.title}
+                    {a.title}
                   </div>
                   <div className="font-serif text-xs text-ink-muted mt-0.5">
-                    {action.desc}
+                    {a.desc}
                   </div>
                 </div>
                 <ArrowRight
                   size={14}
-                  className="text-burnt opacity-50 group-hover:opacity-100 transition-opacity"
+                  className="text-burnt opacity-50 group-hover:opacity-100 transition-opacity shrink-0"
                 />
-              </div>
+              </button>
             ))}
           </div>
         </div>
       </div>
+
+      {/* Quick Action Modal */}
+      {activeQuickAction && (
+        <QuickActionModal
+          repoId={id!}
+          action={activeQuickAction}
+          onClose={() => setActiveQuickAction(null)}
+        />
+      )}
     </div>
   );
 }

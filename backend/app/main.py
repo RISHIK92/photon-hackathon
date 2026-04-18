@@ -12,6 +12,7 @@ from app.database import create_db_and_tables
 from app.models import User  # ensure User table is registered before create_all
 from app.routers import repos, jobs, query, graph, annotations, files
 from app.routers import auth
+from app.routers import onboarding
 
 log = structlog.get_logger()
 settings = get_settings()
@@ -108,6 +109,7 @@ app.include_router(graph.router,        prefix="/api/graph",       tags=["graph"
 app.include_router(annotations.router,  prefix="/api/annotations", tags=["annotations"])
 app.include_router(files.router,        prefix="/api/files",       tags=["files"])
 app.include_router(auth.router,         prefix="/api/auth",        tags=["auth"])
+app.include_router(onboarding.router,   prefix="/api/repos",       tags=["onboarding"])
 
 
 # ─── WebSocket endpoint ───────────────────────────────────────────────────────

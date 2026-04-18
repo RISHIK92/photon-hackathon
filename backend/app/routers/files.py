@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
+from typing import Any
 
 from app.database import get_session
 from app.models import Repo
@@ -9,6 +10,43 @@ from app.config import get_settings
 
 router = APIRouter()
 settings = get_settings()
+
+# ---------- File tree ----------
+
+IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".mypy_cache", ".pytest_cache", "dist", "build", ".next"}
+CODE_EXTS = {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".cpp", ".c", ".h",
+             ".md", ".json", ".yaml", ".yml", ".toml", ".html", ".css", ".sh", ".env"}
+
+def _build_tree(root: str, rel: str = "") -> list[dict[str, Any]]:
+    abs_dir = os.path.join(root, rel) if rel else root
+    entries: list[dict[str, Any]] = []
+    try:
+        items = sorted(os.listdir(abs_dir))
+    except PermissionError:
+        return []
+    dirs = [i for i in items if os.path.isdir(os.path.join(abs_dir, i)) and i not in IGNORE_DIRS]
+    files = [i for i in items if os.path.isfile(os.path.join(abs_dir, i)) and os.path.splitext(i)[1].lower() in CODE_EXTS]
+    for d in dirs:
+        child_rel = f"{rel}/{d}" if rel else d
+        entries.append({"name": d, "path": child_rel, "type": "dir", "children": _build_tree(root, child_rel)})
+    for f in files:
+        child_rel = f"{rel}/{f}" if rel else f
+        entries.append({"name": f, "path": child_rel, "type": "file"})
+    return entries
+
+
+@router.get("/{repo_id}/tree")
+async def get_file_tree(
+    repo_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return the full file tree for a repo (code files only)."""
+    repo = await session.get(Repo, repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
+    if not repo.local_path or not os.path.isdir(repo.local_path):
+        raise HTTPException(status_code=404, detail="Repo local path not found")
+    return {"repo_id": repo_id, "tree": _build_tree(repo.local_path)}
 
 
 @router.get("/{repo_id}")

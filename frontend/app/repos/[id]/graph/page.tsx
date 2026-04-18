@@ -91,42 +91,7 @@ export default function GraphPage() {
           </div>
 
           {/* Filter pills */}
-          <div>
-            <span className="section-label block mb-1.5">SHOW</span>
-            <div className="flex flex-wrap gap-1.5">
-              {FILTER_TYPES.map((f) => {
-                const active = activeFilters.has(f);
-                return (
-                  <button
-                    key={f}
-                    onClick={() => {
-                      setActiveFilters((prev) => {
-                        const next = new Set(prev);
-                        active ? next.delete(f) : next.add(f);
-                        return next;
-                      });
-                    }}
-                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-sans font-medium border transition-colors capitalize
-                      ${
-                        active
-                          ? "bg-burnt text-warm-primary border-burnt"
-                          : "border-warm-divider text-ink-muted hover:border-burnt hover:text-burnt"
-                      }`}
-                  >
-                    {f}s
-                  </button>
-                );
-              })}
-              {activeFilters.size > 0 && (
-                <button
-                  onClick={() => setActiveFilters(new Set())}
-                  className="px-2 py-0.5 rounded-full text-[11px] font-sans text-ink-muted hover:text-burnt"
-                >
-                  clear
-                </button>
-              )}
-            </div>
-          </div>
+          <div className="divider-line" />
 
           <div className="divider-line" />
 

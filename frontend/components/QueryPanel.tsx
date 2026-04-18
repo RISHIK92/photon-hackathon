@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Send, ThumbsUp, ThumbsDown, Network } from "lucide-react";
+import { Send, ThumbsUp, ThumbsDown, Network, Plus } from "lucide-react";
 import { api, type CitedChunk, type Pin as PinType } from "@/lib/api";
 import { readSSE } from "@/lib/sse";
 import React from "react";
@@ -25,6 +25,65 @@ const SUGGESTED_QUESTIONS = [
   "What breaks if I change db_query?",
 ];
 
+const VISIBLE_COUNT = 3;
+
+function FlowTrace({ chunks }: { chunks: CitedChunk[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? chunks : chunks.slice(0, VISIBLE_COUNT);
+  const hidden = chunks.length - VISIBLE_COUNT;
+
+  return (
+    <div className="flex flex-wrap gap-2 items-center">
+      {visible.map((chunk, ci) => {
+        const label =
+          chunk.symbol_name ||
+          (chunk.path || chunk.file_path || "").split("/").pop() ||
+          "File";
+        const filePath = chunk.path || chunk.file_path || "";
+        const filename = filePath.split("/").pop() || filePath;
+        return (
+          <div
+            key={ci}
+            title={filePath}
+            className="flex items-center gap-1.5 bg-warm-secondary border border-warm-divider rounded-full px-3 py-1 max-w-[220px] hover:border-burnt/50 transition-colors group cursor-default"
+          >
+            <span className="w-4 h-4 rounded-full bg-burnt/10 border border-burnt/30 flex items-center justify-center font-sans text-[9px] text-burnt shrink-0">
+              {ci + 1}
+            </span>
+            <span className="font-mono text-xs text-burnt truncate group-hover:text-burnt leading-none">
+              {label !== filename ? label : filename}
+            </span>
+            {label !== filename && (
+              <span className="font-sans text-[10px] text-ink-muted truncate leading-none">
+                {filename}
+              </span>
+            )}
+          </div>
+        );
+      })}
+
+      {!expanded && hidden > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="flex items-center gap-1 bg-warm-secondary border border-warm-divider rounded-full px-3 py-1 font-sans text-xs text-ink-muted hover:text-burnt hover:border-burnt/50 transition-colors"
+        >
+          <Plus size={11} />
+          {hidden} more
+        </button>
+      )}
+
+      {expanded && chunks.length > VISIBLE_COUNT && (
+        <button
+          onClick={() => setExpanded(false)}
+          className="font-sans text-[11px] text-ink-muted hover:text-burnt transition-colors underline underline-offset-2"
+        >
+          Show less
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function QueryPanel({ repoId }: QueryPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -34,7 +93,7 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
   useEffect(() => {
     // Scroll to bottom when messages update
     if (messages.length > 0) {
-      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
     }
   }, [messages]);
 
@@ -51,7 +110,8 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
       setStreaming(true);
 
       try {
-        const sessionId = messages.find((m) => m.sessionId)?.sessionId ?? undefined;
+        const sessionId =
+          messages.find((m) => m.sessionId)?.sessionId ?? undefined;
         const res = await api.query.stream({
           repo_id: repoId,
           question,
@@ -94,7 +154,7 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
         setStreaming(false);
       }
     },
-    [repoId, messages, streaming]
+    [repoId, messages, streaming],
   );
 
   return (
@@ -103,10 +163,12 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
         <div className="animate-fade-in text-center flex flex-col items-center">
           <p className="section-label mb-6">QUERY</p>
           <h1 className="text-4xl md:text-5xl font-serif text-ink-primary font-medium mb-4">
-            <span className="italic text-burnt">Ask</span> anything about your codebase.
+            <span className="italic text-burnt">Ask</span> anything about your
+            codebase.
           </h1>
           <p className="font-serif text-lg text-ink-muted mb-10">
-            Trace flows, find usages, understand dependencies — in plain language.
+            Trace flows, find usages, understand dependencies — in plain
+            language.
           </p>
 
           <div className="flex flex-wrap gap-3 justify-center mb-12 max-w-2xl">
@@ -143,14 +205,25 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
               Ask &rarr;
             </button>
           </div>
-          
+
           <div className="flex w-full items-center justify-start gap-4 mt-3">
-            {["Include code snippets", "Deep trace", "Show graph"].map((toggle) => (
-              <label key={toggle} className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="accent-burnt rounded-sm" defaultChecked={toggle === "Include code snippets"} />
-                <span className="font-sans text-[11px] uppercase tracking-wider text-ink-muted">{toggle}</span>
-              </label>
-            ))}
+            {["Include code snippets", "Deep trace", "Show graph"].map(
+              (toggle) => (
+                <label
+                  key={toggle}
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-burnt rounded-sm"
+                    defaultChecked={toggle === "Include code snippets"}
+                  />
+                  <span className="font-sans text-[11px] uppercase tracking-wider text-ink-muted">
+                    {toggle}
+                  </span>
+                </label>
+              ),
+            )}
           </div>
         </div>
       )}
@@ -160,8 +233,13 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
           {messages.map((msg, i) => {
             if (msg.role === "user") {
               return (
-                <div key={i} className="bg-warm-secondary border-l-4 border-burnt p-6 rounded-r-md">
-                  <p className="font-serif italic text-ink-primary text-xl">"{msg.text}"</p>
+                <div
+                  key={i}
+                  className="bg-warm-secondary border-l-4 border-burnt p-6 rounded-r-md"
+                >
+                  <p className="font-serif italic text-ink-primary text-xl">
+                    "{msg.text}"
+                  </p>
                 </div>
               );
             }
@@ -172,40 +250,25 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
                 {/* FLOW TRACE */}
                 {msg.chunks && msg.chunks.length > 0 && (
                   <div>
-                    <h4 className="section-label mb-6">FLOW TRACE</h4>
-                    <div className="flex flex-col gap-6 relative">
-                      {/* Vertical line connector */}
-                      <div className="absolute left-[11px] top-6 bottom-6 w-px bg-warm-divider z-0" />
-                      
-                      {msg.chunks.map((chunk, ci) => (
-                        <div key={ci} className="relative z-10 flex gap-4">
-                          <div className="w-6 h-6 flex items-center justify-center bg-warm-secondary border border-warm-divider rounded-full font-sans text-[10px] text-ink-primary mt-1 shrink-0">
-                            {ci + 1}
-                          </div>
-                          <div className="flex flex-col gap-1">
-                            <span className="font-mono text-burnt text-sm cursor-pointer hover:underline">
-                              {chunk.symbol_name || "Code Segment"}
-                            </span>
-                            <span className="font-sans text-[11px] text-ink-muted">
-                              {chunk.path || chunk.file_path}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <h4 className="section-label mb-4">FLOW TRACE</h4>
+                    <FlowTrace chunks={msg.chunks} />
                   </div>
                 )}
-                
+
                 {/* GRAPH CONTEXT (Mocked) */}
                 {msg.chunks && msg.chunks.length > 0 && (
                   <div>
                     <h4 className="section-label mb-4">GRAPH CONTEXT</h4>
                     <div className="border border-warm-divider rounded-md bg-[#F0EBE1] h-48 flex items-center justify-center relative overflow-hidden group cursor-pointer">
-                      <Network size={32} strokeWidth={1} className="text-burnt opacity-50" />
+                      <Network
+                        size={32}
+                        strokeWidth={1}
+                        className="text-burnt opacity-50"
+                      />
                       <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                         <span className="text-burnt font-serif font-medium bg-warm-primary px-3 py-1 rounded-sm border border-burnt/30 shadow-sm">
-                           Open in Graph Explorer &rarr;
-                         </span>
+                        <span className="text-burnt font-serif font-medium bg-warm-primary px-3 py-1 rounded-sm border border-burnt/30 shadow-sm">
+                          Open in Graph Explorer &rarr;
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -215,16 +278,25 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
                 <div>
                   <h4 className="section-label mb-4">EXPLANATION</h4>
                   <div className="font-serif text-ink-primary text-lg leading-relaxed whitespace-pre-wrap">
-                    {msg.text || (streaming && i === messages.length - 1 ? "Thinking..." : "")}
+                    {msg.text ||
+                      (streaming && i === messages.length - 1
+                        ? "Thinking..."
+                        : "")}
                   </div>
                 </div>
 
                 {/* Feedback */}
                 {!streaming && msg.text && (
                   <div className="flex items-center gap-3 mt-4">
-                    <span className="text-sm font-sans text-ink-muted mr-2">Was this helpful?</span>
-                    <button className="p-1.5 border border-warm-divider rounded-sm text-ink-muted hover:text-burnt hover:border-burnt transition-colors"><ThumbsUp size={14}/></button>
-                    <button className="p-1.5 border border-warm-divider rounded-sm text-ink-muted hover:text-burnt hover:border-burnt transition-colors"><ThumbsDown size={14}/></button>
+                    <span className="text-sm font-sans text-ink-muted mr-2">
+                      Was this helpful?
+                    </span>
+                    <button className="p-1.5 border border-warm-divider rounded-sm text-ink-muted hover:text-burnt hover:border-burnt transition-colors">
+                      <ThumbsUp size={14} />
+                    </button>
+                    <button className="p-1.5 border border-warm-divider rounded-sm text-ink-muted hover:text-burnt hover:border-burnt transition-colors">
+                      <ThumbsDown size={14} />
+                    </button>
                   </div>
                 )}
               </div>
@@ -251,7 +323,7 @@ export default function QueryPanel({ repoId }: QueryPanelProps) {
                 disabled={!input.trim() || streaming}
                 className="absolute right-2 top-1.5 bottom-1.5 bg-burnt text-warm-primary px-4 rounded-full font-serif font-medium hover:bg-burnt-hover disabled:opacity-50 transition-colors flex items-center"
               >
-                 <Send size={14} className="mr-2" /> Ask
+                <Send size={14} className="mr-2" /> Ask
               </button>
             </div>
           </div>

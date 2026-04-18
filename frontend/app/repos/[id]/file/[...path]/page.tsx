@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import CodeViewer from "@/components/CodeViewer";
+import FileExplorer from "@/components/FileExplorer";
 import { api, type GraphData } from "@/lib/api";
-import { Loader2, ArrowRight } from "lucide-react";
+import { Loader2, ArrowRight, FolderTree, ChevronLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import React from "react";
 
@@ -20,6 +21,7 @@ export default function FileViewerPage() {
   const [selectedFunc, setSelectedFunc] = useState<string | null>(null);
   const [subgraph, setSubgraph] = useState<GraphData | null>(null);
   const [sgLoading, setSgLoading] = useState(false);
+  const [explorerOpen, setExplorerOpen] = useState(true);
 
   // Fetch subgraph for this file to get real deps/imports
   useEffect(() => {
@@ -52,7 +54,37 @@ export default function FileViewerPage() {
     return subgraph?.nodes.find((n) => n.id === id)?.path ?? "";
   }
   return (
-    <div className="flex h-full w-full bg-[#F0EBE1]">
+    <div className="flex h-full w-full bg-[#F0EBE1] overflow-hidden">
+      {/* Left — File Explorer */}
+      {explorerOpen ? (
+        <div className="w-[220px] shrink-0 bg-warm-secondary border-r border-warm-divider flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2.5 border-b border-warm-divider shrink-0">
+            <div className="flex items-center gap-1.5">
+              <FolderTree size={13} className="text-burnt" />
+              <span className="section-label">FILES</span>
+            </div>
+            <button
+              onClick={() => setExplorerOpen(false)}
+              className="text-ink-muted hover:text-ink-primary p-0.5 rounded"
+              title="Collapse"
+            >
+              <ChevronLeft size={13} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <FileExplorer repoId={repoId} activePath={filePath} />
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setExplorerOpen(true)}
+          className="w-7 shrink-0 bg-warm-secondary border-r border-warm-divider flex items-center justify-center hover:bg-warm-primary transition-colors"
+          title="Open file explorer"
+        >
+          <FolderTree size={13} className="text-burnt" />
+        </button>
+      )}
+
       {/* Center Code Area */}
       <div className="flex-1 overflow-hidden border-r border-warm-divider bg-[#F0EBE1]">
         <CodeViewer

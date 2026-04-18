@@ -108,6 +108,13 @@ export interface ImpactAnalysis {
   explanation: string;
 }
 
+export interface FileTreeNode {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  children?: FileTreeNode[];
+}
+
 export interface CitedChunk {
   id?: string;
   path?: string;
@@ -139,6 +146,33 @@ export interface EntryPoint {
   sym_count: number;
   top_symbols: string[];
   fan_out: number;
+}
+
+export interface LearningPathFile {
+  path: string;
+  node_id: string;
+  language: string;
+  fan_in: number;
+  fan_out: number;
+  key_concepts: string[];
+  why_first: string;
+  symbols: string[];
+}
+
+export interface LearningPhase {
+  phase_number: number;
+  title: string;
+  description: string;
+  estimated_minutes: number;
+  files: LearningPathFile[];
+}
+
+export interface LearningPath {
+  repo_id: string;
+  phases: LearningPhase[];
+  total_files: number;
+  total_phases: number;
+  total_estimated_minutes: number;
 }
 
 // ─── Repos ────────────────────────────────────────────────────────────────────
@@ -242,6 +276,15 @@ export const api = {
     },
   },
 
+  onboarding: {
+    async getLearningPath(repoId: string): Promise<LearningPath> {
+      const res = await fetch(`${BASE}/api/repos/${repoId}/learning-path`, {
+        headers: headers(),
+      });
+      return handleResponse<LearningPath>(res);
+    },
+  },
+
   files: {
     async get(
       repoId: string,
@@ -252,6 +295,14 @@ export const api = {
         headers: headers(),
       });
       return handleResponse<{ content: string; language: string }>(res);
+    },
+    async tree(
+      repoId: string,
+    ): Promise<{ repo_id: string; tree: FileTreeNode[] }> {
+      const res = await fetch(`${BASE}/api/files/${repoId}/tree`, {
+        headers: headers(),
+      });
+      return handleResponse<{ repo_id: string; tree: FileTreeNode[] }>(res);
     },
   },
 
@@ -297,6 +348,38 @@ export const api = {
         method: "POST",
         headers: headers(),
         body: JSON.stringify(payload),
+      });
+    },
+
+    traceFunction(repo_id: string, function_name: string): Promise<Response> {
+      return fetch(`${BASE}/api/query/trace-function`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ repo_id, function_name }),
+      });
+    },
+
+    findUsages(repo_id: string, symbol: string): Promise<Response> {
+      return fetch(`${BASE}/api/query/find-usages`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ repo_id, symbol }),
+      });
+    },
+
+    explainFile(repo_id: string, file_path: string): Promise<Response> {
+      return fetch(`${BASE}/api/query/explain-file`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ repo_id, file_path }),
+      });
+    },
+
+    impactAnalysis(repo_id: string, symbol: string): Promise<Response> {
+      return fetch(`${BASE}/api/query/impact-analysis`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ repo_id, symbol }),
       });
     },
   },

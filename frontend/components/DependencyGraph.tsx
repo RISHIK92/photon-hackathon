@@ -131,7 +131,7 @@ function GraphInner({
           // file
           background = "#C5B49A";
           border = "1.5px solid #7A6A58";
-          color = "#1C1714";
+          color = "#FFFFFF";
           borderRadius = "8px";
         }
 
@@ -150,21 +150,23 @@ function GraphInner({
             border,
             borderRadius,
             color,
-            fontSize: 11,
+            fontSize: 13,
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-            fontWeight: isSelected ? 700 : 500,
-            padding: type === "file" ? "7px 14px" : "11px 11px",
+            fontWeight: isSelected ? 700 : 600,
+            padding: "10px 16px",
             textAlign: "center" as const,
             opacity,
             transition: "all 0.15s ease",
-            minWidth: type !== "file" ? 52 : 90,
-            aspectRatio: type !== "file" ? "1/1" : "auto",
-            display: "flex",
+            width: "auto",
+            height: "auto",
+            whiteSpace: "nowrap" as const,
+            display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
+            lineHeight: 1.4,
             boxShadow: isSelected
-              ? "0 0 0 3px rgba(196,98,29,0.35), 0 4px 12px rgba(0,0,0,0.25)"
-              : "0 2px 6px rgba(0,0,0,0.18)",
+              ? "0 0 0 4px rgba(196,98,29,0.4), 0 6px 16px rgba(0,0,0,0.3)"
+              : "0 3px 8px rgba(0,0,0,0.22)",
           },
         };
       });
@@ -183,16 +185,16 @@ function GraphInner({
         const opacity = isConnected ? 1 : 0.12;
 
         let stroke = "#C4621D";
-        let strokeWidth = isConnected ? 2.5 : 1.5;
+        let strokeWidth = isConnected ? 3 : 1.5;
         let strokeDasharray = "none";
 
         if (edge.type === "imports" || edge.type === "IMPORTS") {
           stroke = "#5A4E44";
-          strokeWidth = isConnected ? 2 : 1;
-          strokeDasharray = "5 4";
+          strokeWidth = isConnected ? 2.5 : 1;
+          strokeDasharray = "6 4";
         } else if (edge.type === "defines" || edge.type === "DEFINES") {
           stroke = "#8B6914";
-          strokeWidth = isConnected ? 1.5 : 1;
+          strokeWidth = isConnected ? 2 : 1;
           strokeDasharray = "3 4";
         }
 
@@ -202,12 +204,12 @@ function GraphInner({
           target: edge.target,
           label: isConnected ? edge.type : "",
           labelStyle: {
-            fontSize: 9,
-            fill: "#5A4E44",
+            fontSize: 10,
+            fill: "#3A2E26",
             fontFamily: "monospace",
-            fontWeight: 600,
+            fontWeight: 700,
           },
-          labelBgStyle: { fill: "#F0EBE1", fillOpacity: 0.85 },
+          labelBgStyle: { fill: "#F0EBE1", fillOpacity: 0.9 },
           style: {
             stroke,
             strokeWidth,
@@ -218,8 +220,8 @@ function GraphInner({
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: stroke,
-            width: 16,
-            height: 16,
+            width: 20,
+            height: 20,
           },
           animated: false,
         };
