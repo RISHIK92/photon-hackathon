@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 
 from app.config import get_settings
 from app.database import create_db_and_tables
-from app.models import User  # ensure User table is registered before create_all
+from app.models import User, LearningPathCache  # ensure tables are registered before create_all
 from app.routers import repos, jobs, query, graph, annotations, files
 from app.routers import auth
 from app.routers import onboarding

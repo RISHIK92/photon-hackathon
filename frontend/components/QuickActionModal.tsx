@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Search,
   FileCode,
@@ -10,6 +10,7 @@ import {
   Loader2,
   ArrowRight,
   ChevronRight,
+  FolderSearch,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
@@ -75,6 +76,299 @@ interface CitedChunk {
   symbol_name?: string;
 }
 
+// ── Inline markdown renderer (mirrors QueryPanel) ──────────────────────────
+function renderInline(text: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**"))
+      return (
+        <strong key={i} className="font-semibold text-ink-primary">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    if (part.startsWith("*") && part.endsWith("*"))
+      return (
+        <em key={i} className="italic text-ink-secondary">
+          {part.slice(1, -1)}
+        </em>
+      );
+    if (part.startsWith("`") && part.endsWith("`"))
+      return (
+        <code
+          key={i}
+          className="font-mono text-sm bg-warm-secondary border border-warm-divider rounded px-1.5 py-0.5 text-burnt"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    return <React.Fragment key={i}>{part}</React.Fragment>;
+  });
+}
+
+function MarkdownResponse({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith("```")) {
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      nodes.push(
+        <pre
+          key={i}
+          className="bg-[#1C1714] rounded-md p-3 my-3 overflow-x-auto border border-warm-divider"
+        >
+          <code className="font-mono text-xs text-[#F5EDE3] leading-relaxed whitespace-pre">
+            {codeLines.join("\n")}
+          </code>
+        </pre>,
+      );
+      i++;
+      continue;
+    }
+    const h3 = line.match(/^### (.+)/);
+    if (h3) {
+      nodes.push(
+        <h3
+          key={i}
+          className="font-serif text-sm font-semibold text-ink-primary mt-4 mb-1"
+        >
+          {renderInline(h3[1])}
+        </h3>,
+      );
+      i++;
+      continue;
+    }
+    const h2 = line.match(/^## (.+)/);
+    if (h2) {
+      nodes.push(
+        <h2
+          key={i}
+          className="font-serif text-base font-semibold text-ink-primary mt-5 mb-1"
+        >
+          {renderInline(h2[1])}
+        </h2>,
+      );
+      i++;
+      continue;
+    }
+    const h1 = line.match(/^# (.+)/);
+    if (h1) {
+      nodes.push(
+        <h1
+          key={i}
+          className="font-serif text-lg font-bold text-ink-primary mt-5 mb-2"
+        >
+          {renderInline(h1[1])}
+        </h1>,
+      );
+      i++;
+      continue;
+    }
+    if (/^---+$/.test(line.trim())) {
+      nodes.push(<hr key={i} className="border-warm-divider my-3" />);
+      i++;
+      continue;
+    }
+    if (line.startsWith("> ")) {
+      nodes.push(
+        <blockquote
+          key={i}
+          className="border-l-4 border-burnt pl-3 my-2 font-serif italic text-ink-muted text-sm"
+        >
+          {renderInline(line.slice(2))}
+        </blockquote>,
+      );
+      i++;
+      continue;
+    }
+    if (/^[-*+] /.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*+] /.test(lines[i])) {
+        items.push(lines[i].replace(/^[-*+] /, ""));
+        i++;
+      }
+      nodes.push(
+        <ul key={i} className="mb-3 flex flex-col gap-1">
+          {items.map((item, j) => (
+            <li
+              key={j}
+              className="flex gap-2 items-start font-serif text-sm text-ink-primary leading-relaxed"
+            >
+              <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-burnt shrink-0" />
+              <span>{renderInline(item)}</span>
+            </li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+    if (/^\d+\. /.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+\. /.test(lines[i])) {
+        items.push(lines[i].replace(/^\d+\. /, ""));
+        i++;
+      }
+      nodes.push(
+        <ol key={i} className="mb-3 flex flex-col gap-1">
+          {items.map((item, j) => (
+            <li
+              key={j}
+              className="flex gap-2 items-start font-serif text-sm text-ink-primary leading-relaxed"
+            >
+              <span className="font-mono text-xs text-burnt mt-0.5 shrink-0 w-4 text-right">
+                {j + 1}.
+              </span>
+              <span>{renderInline(item)}</span>
+            </li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+    nodes.push(
+      <p
+        key={i}
+        className="font-serif text-ink-primary text-sm leading-relaxed mb-3"
+      >
+        {renderInline(line)}
+      </p>,
+    );
+    i++;
+  }
+  return <div className="flex flex-col">{nodes}</div>;
+}
+
+// ── File search picker ─────────────────────────────────────────────────────
+function FileSearchPicker({
+  repoId,
+  value,
+  onChange,
+  placeholder,
+}: {
+  repoId: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState(value);
+  const [allFiles, setAllFiles] = useState<string[]>([]);
+  const [filtered, setFiltered] = useState<string[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Load tree once
+  useEffect(() => {
+    setLoading(true);
+    api.files
+      .tree(repoId)
+      .then(({ tree }) => {
+        const flat: string[] = [];
+        function walk(nodes: import("@/lib/api").FileTreeNode[], prefix = "") {
+          for (const n of nodes) {
+            const p = prefix ? `${prefix}/${n.name}` : n.name;
+            if (n.type === "file") flat.push(p);
+            else if (n.children) walk(n.children, p);
+          }
+        }
+        walk(tree);
+        setAllFiles(flat);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoId]);
+
+  // Close on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node))
+        setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleInput = useCallback(
+    (v: string) => {
+      setQuery(v);
+      onChange(v);
+      if (!v.trim()) {
+        setFiltered([]);
+        setOpen(false);
+        return;
+      }
+      const q = v.toLowerCase();
+      setFiltered(
+        allFiles.filter((f) => f.toLowerCase().includes(q)).slice(0, 12),
+      );
+      setOpen(true);
+    },
+    [allFiles, onChange],
+  );
+
+  function select(path: string) {
+    setQuery(path);
+    onChange(path);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="flex items-center gap-2 bg-warm-secondary border border-warm-divider rounded-sm px-3 py-2 focus-within:border-burnt transition-colors">
+        <FolderSearch size={13} className="text-burnt shrink-0" />
+        <input
+          value={query}
+          onChange={(e) => handleInput(e.target.value)}
+          onFocus={() => query.trim() && filtered.length > 0 && setOpen(true)}
+          placeholder={placeholder ?? "Search for a file…"}
+          className="flex-1 bg-transparent font-mono text-sm text-ink-primary placeholder:text-ink-muted outline-none"
+        />
+        {loading && (
+          <Loader2 size={12} className="animate-spin text-ink-muted shrink-0" />
+        )}
+        {query && (
+          <button
+            onClick={() => {
+              setQuery("");
+              onChange("");
+              setFiltered([]);
+              setOpen(false);
+            }}
+            className="text-ink-muted hover:text-ink-primary shrink-0"
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-warm-primary border border-warm-divider rounded-sm shadow-lg z-50 max-h-48 overflow-y-auto">
+          {filtered.map((f) => (
+            <button
+              key={f}
+              onClick={() => select(f)}
+              className="w-full flex items-center gap-2 px-3 py-2 font-mono text-[11px] text-ink-secondary hover:bg-warm-secondary hover:text-burnt text-left transition-colors"
+            >
+              <FileCode size={11} className="shrink-0 text-burnt/60" />
+              <span className="truncate">{f}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function QuickActionModal({
   repoId,
   action,
@@ -91,9 +385,12 @@ export default function QuickActionModal({
   const answerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // For "explain" action: allow file search picker
+  const useFilePicker = action === "explain" || action === "impact";
+
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!useFilePicker) inputRef.current?.focus();
+  }, [useFilePicker]);
 
   // Auto-scroll answer box
   useEffect(() => {
@@ -192,19 +489,28 @@ export default function QuickActionModal({
 
           {/* Input */}
           <div className="flex gap-2">
-            <div className="flex-1 relative">
+            <div className="flex-1">
               <label className="section-label block mb-1.5">
                 {meta.inputLabel.toUpperCase()}
               </label>
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={meta.placeholder}
-                disabled={streaming}
-                className="w-full bg-warm-secondary border border-warm-divider rounded-sm font-mono text-sm text-ink-primary px-3 py-2 focus:border-burnt outline-none placeholder:text-ink-muted disabled:opacity-60"
-              />
+              {useFilePicker ? (
+                <FileSearchPicker
+                  repoId={repoId}
+                  value={input}
+                  onChange={setInput}
+                  placeholder={meta.placeholder}
+                />
+              ) : (
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={meta.placeholder}
+                  disabled={streaming}
+                  className="w-full bg-warm-secondary border border-warm-divider rounded-sm font-mono text-sm text-ink-primary px-3 py-2 focus:border-burnt outline-none placeholder:text-ink-muted disabled:opacity-60"
+                />
+              )}
             </div>
             <button
               onClick={run}
@@ -233,9 +539,9 @@ export default function QuickActionModal({
               <h4 className="section-label mb-2">RESULT</h4>
               <div
                 ref={answerRef}
-                className="bg-warm-secondary border border-warm-divider rounded-sm p-4 font-serif text-sm text-ink-primary leading-relaxed max-h-72 overflow-y-auto whitespace-pre-wrap"
+                className="bg-warm-secondary border border-warm-divider rounded-sm p-4 max-h-72 overflow-y-auto"
               >
-                {answer}
+                {answer ? <MarkdownResponse text={answer} /> : null}
                 {streaming && !done && (
                   <span className="inline-block w-1.5 h-4 bg-burnt ml-0.5 animate-pulse rounded-sm align-middle" />
                 )}

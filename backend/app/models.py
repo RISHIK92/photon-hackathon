@@ -169,6 +169,7 @@ class QueryRequest(SQLModel):
     repo_id: str
     question: str
     session_id: Optional[str] = None
+    file_context_path: Optional[str] = None  # Scope AI answer to a specific file
 
 
 class QueryResponse(SQLModel):
@@ -179,3 +180,13 @@ class QueryResponse(SQLModel):
     cited_chunks: list[dict] = []
     # FIX: Replaced List[dict] with list[dict]
     graph_nodes: list[dict] = []
+
+
+# ─── Learning Path Cache ───────────────────────────────────────────────────────
+
+class LearningPathCache(SQLModel, table=True):
+    __tablename__ = "learning_path_cache"
+    id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    repo_id: str = Field(sa_column=Column(String, ForeignKey("repos.id", ondelete="CASCADE"), nullable=False, index=True, unique=True))
+    data: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    generated_at: datetime = Field(default_factory=datetime.utcnow)

@@ -150,7 +150,6 @@ export default function RepoDashboard() {
                 {[
                   "Graph view of all dependencies",
                   "AI-powered code search",
-                  "File-by-file explorer",
                   "Impact analysis",
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2">
@@ -211,10 +210,8 @@ export default function RepoDashboard() {
   const tabs = [
     { label: "OVERVIEW", path: `/repos/${id}` },
     { label: "GRAPH", path: `/repos/${id}/graph` },
-    { label: "EXPLORER", path: `/repos/${id}/file` },
     { label: "QUERY", path: `/repos/${id}/query` },
     { label: "ONBOARDING", path: `/repos/${id}/onboarding` },
-    { label: "DOCS", path: `/repos/${id}/docs` },
   ];
 
   return (

@@ -281,14 +281,6 @@ export default function GraphContextPanel({
         </div>
       </div>
 
-      {/* Open file button */}
-      <button
-        className="flex items-center justify-center gap-2 w-full border border-warm-divider rounded-sm py-1.5 text-xs font-sans text-ink-muted hover:text-burnt hover:border-burnt transition-colors"
-        onClick={() => onNavigate?.(node.path)}
-      >
-        <ExternalLink size={12} /> View File
-      </button>
-
       {/* Tab switcher */}
       <div className="flex rounded-sm overflow-hidden border border-warm-divider">
         {(["deps", "impact"] as const).map((t) => (

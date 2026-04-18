@@ -173,6 +173,8 @@ export interface LearningPath {
   total_files: number;
   total_phases: number;
   total_estimated_minutes: number;
+  cached?: boolean;
+  generated_at?: string;
 }
 
 // ─── Repos ────────────────────────────────────────────────────────────────────
@@ -277,10 +279,12 @@ export const api = {
   },
 
   onboarding: {
-    async getLearningPath(repoId: string): Promise<LearningPath> {
-      const res = await fetch(`${BASE}/api/repos/${repoId}/learning-path`, {
-        headers: headers(),
-      });
+    async getLearningPath(
+      repoId: string,
+      regenerate = false,
+    ): Promise<LearningPath> {
+      const url = `${BASE}/api/repos/${repoId}/learning-path${regenerate ? "?regenerate=true" : ""}`;
+      const res = await fetch(url, { headers: headers() });
       return handleResponse<LearningPath>(res);
     },
   },
@@ -343,6 +347,7 @@ export const api = {
       repo_id: string;
       question: string;
       session_id?: string;
+      file_context_path?: string;
     }): Promise<Response> {
       return fetch(`${BASE}/api/query`, {
         method: "POST",

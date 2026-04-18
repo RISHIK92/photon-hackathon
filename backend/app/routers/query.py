@@ -17,12 +17,18 @@ from app.core.query_engine.llm_orchestrator import stream_answer
 router = APIRouter()
 
 
-async def _stream_question(repo_id: str, question: str, session: AsyncSession):
+async def _stream_question(repo_id: str, question: str, session: AsyncSession, file_context_path: Optional[str] = None):
     """Shared SSE streamer: classify → retrieve → assemble → stream."""
+    # Prepend file context hint so retrieval + LLM stay scoped to that file
+    effective_question = question
+    if file_context_path:
+        effective_question = (
+            f"[Focus your answer specifically on the file `{file_context_path}`]\n\n{question}"
+        )
     session_id = str(uuid.uuid4())
-    intent = await classify_intent(question)
-    chunks, graph_nodes = await hybrid_retrieve(repo_id=repo_id, question=question, intent=intent)
-    context = await assemble_context(chunks, graph_nodes, question)
+    intent = await classify_intent(effective_question)
+    chunks, graph_nodes = await hybrid_retrieve(repo_id=repo_id, question=effective_question, intent=intent)
+    context = await assemble_context(chunks, graph_nodes, effective_question)
 
     async def gen():
         meta = {
@@ -44,7 +50,7 @@ async def _stream_question(repo_id: str, question: str, session: AsyncSession):
 @router.post("")
 async def query_repo(payload: QueryRequest, session: AsyncSession = Depends(get_session)):
     """Main NL query endpoint. Returns a streaming SSE response."""
-    return await _stream_question(payload.repo_id, payload.question, session)
+    return await _stream_question(payload.repo_id, payload.question, session, payload.file_context_path)
 
 
 # ── Quick Action models ───────────────────────────────────────────────────────

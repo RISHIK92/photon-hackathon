@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Loader, AlertTriangle, BookOpen, RefreshCw } from "lucide-react";
+import {
+  Loader,
+  AlertTriangle,
+  BookOpen,
+  RefreshCw,
+  DatabaseZap,
+} from "lucide-react";
 import { api, type LearningPath } from "@/lib/api";
 import LearningPathTimeline from "@/components/LearningPathTimeline";
 
@@ -12,14 +18,16 @@ export default function OnboardingPage() {
 
   const [data, setData] = useState<LearningPath | null>(null);
   const [loading, setLoading] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async (force = false) => {
+  const load = async (regenerate = false) => {
     if (!id) return;
-    setLoading(true);
+    if (regenerate) setRegenerating(true);
+    else setLoading(true);
     setError(null);
     try {
-      const result = await api.onboarding.getLearningPath(id);
+      const result = await api.onboarding.getLearningPath(id, regenerate);
       setData(result);
     } catch (e: unknown) {
       setError(
@@ -27,6 +35,7 @@ export default function OnboardingPage() {
       );
     } finally {
       setLoading(false);
+      setRegenerating(false);
     }
   };
 
@@ -50,15 +59,32 @@ export default function OnboardingPage() {
             AI-generated onboarding guide — files ordered from foundational to
             feature-level.
           </p>
+          {data && !loading && (
+            <div className="flex items-center gap-2 mt-2">
+              <DatabaseZap
+                size={12}
+                className={data.cached ? "text-burnt" : "text-ink-muted"}
+              />
+              <span className="font-sans text-[11px] text-ink-muted">
+                {data.cached
+                  ? `Loaded from cache · generated ${data.generated_at ? new Date(data.generated_at).toLocaleDateString() : "previously"}`
+                  : "Freshly generated · saved to database"}
+              </span>
+            </div>
+          )}
         </div>
 
         {data && !loading && (
           <button
             onClick={() => load(true)}
-            className="btn-secondary flex items-center gap-2 text-xs"
+            disabled={regenerating}
+            className="btn-secondary flex items-center gap-2 text-xs disabled:opacity-50"
           >
-            <RefreshCw size={12} />
-            Regenerate
+            <RefreshCw
+              size={12}
+              className={regenerating ? "animate-spin" : ""}
+            />
+            {regenerating ? "Regenerating…" : "Regenerate"}
           </button>
         )}
       </div>
@@ -73,7 +99,8 @@ export default function OnboardingPage() {
             Analysing dependency graph and generating your learning path…
           </p>
           <p className="font-sans text-xs text-ink-muted">
-            This may take 15–30 seconds the first time.
+            This may take 15–30 seconds the first time. Subsequent visits load
+            instantly from the database.
           </p>
         </div>
       )}
