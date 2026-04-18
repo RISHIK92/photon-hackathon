@@ -1,310 +1,202 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import {
-  GitBranch, GitFork, Package, FolderGit2, Clock, Trash2,
-  ArrowRight, Sparkles, Zap, Network, MessageSquare,
-} from "lucide-react";
-import Navbar from "@/components/Navbar";
-import RepoConnectForm from "@/components/RepoConnectForm";
-import IngestionProgress from "@/components/IngestionProgress";
-import { api, type Repo, type Job } from "@/lib/api";
-import { relativeTime, langColor } from "@/lib/utils";
-import React from "react";
+import { Network, Search, GitBranch } from "lucide-react";
+import { api, type Repo } from "@/lib/api";
 
 export default function LandingPage() {
   const router = useRouter();
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [activeStep, setActiveStep] = useState<"form" | "ingesting" | null>(null);
-  const [currentRepo, setCurrentRepo] = useState<Repo | null>(null);
-  const [currentJob, setCurrentJob] = useState<Job | null>(null);
+  const [showInput, setShowInput] = useState(false);
+  const [repoUrl, setRepoUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.repos.list().then(setRepos).catch(console.error);
-  }, []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleRepoCreated(repo: Repo) {
-    setCurrentRepo(repo);
-    // Get the latest job for this repo
+  const handleCreateRepo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!repoUrl) return;
+    setLoading(true);
+    setError(null);
     try {
-      const jobs = await api.jobs.listForRepo(repo.id);
-      if (jobs.length > 0) setCurrentJob(jobs[0]);
-    } catch {}
-    setActiveStep("ingesting");
-    setRepos((prev) => [repo, ...prev.filter((r) => r.id !== repo.id)]);
-  }
+      const name = repoUrl.split('/').pop() || "unknown-repo";
+      const repo = await api.repos.create({
+        name,
+        source_type: "github",
+        source_url: repoUrl
+      });
+      router.push(`/repos/${repo.id}`);
+    } catch (err) {
+      setError((err as Error).message || "Failed to create repo.");
+      setLoading(false);
+    }
+  };
 
-  function handleIngestionComplete() {
-    if (currentRepo) router.push(`/repos/${currentRepo.id}`);
-  }
-
-  async function deleteRepo(id: string) {
-    await api.repos.delete(id);
-    setRepos((prev) => prev.filter((r) => r.id !== id));
-  }
-
-  const statusBadge: Record<string, string> = {
-    READY: "badge-ready",
-    INGESTING: "badge-ingesting",
-    PENDING: "badge-pending",
-    FAILED: "badge-failed",
+  const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const repo = await api.repos.uploadZip(file.name, file);
+      router.push(`/repos/${repo.id}`);
+    } catch (err) {
+      setError((err as Error).message || "Failed to upload repository.");
+      setLoading(false);
+    }
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <Navbar />
-
-      {/* Hero */}
-      <section
-        className="grid-bg"
-        style={{
-          position: "relative",
-          overflow: "hidden",
-          padding: "5rem 1.5rem 4rem",
-          textAlign: "center",
-        }}
-      >
-        {/* Glow blob */}
-        <div
-          style={{
-            position: "absolute",
-            top: -120,
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: 600,
-            height: 400,
-            borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%)",
-            pointerEvents: "none",
-          }}
-        />
-
-        <div style={{ position: "relative", maxWidth: 720, margin: "0 auto" }}>
-          <div
-            className="badge badge-ingesting animate-fade-in"
-            style={{ marginBottom: "1.25rem", display: "inline-flex" }}
-          >
-            <Sparkles size={11} /> Powered by Gemini 2.0 Flash
-          </div>
-
-          <h1 className="text-gradient animate-fade-in" style={{ marginBottom: "1rem" }}>
-            Understand Any Codebase<br />Without Reading Every File
+    <div className="flex flex-col min-h-[calc(100vh-56px)]">
+      {/* Hero Section */}
+      <section className="relative overflow-hidden pt-28 pb-32 px-6 flex flex-col items-center text-center">
+        {/* Oversized fade text */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[30rem] font-serif decorative opacity-[0.03] select-none pointer-events-none z-0">
+          01
+        </div>
+        
+        <div className="relative z-10 max-w-4xl mx-auto flex flex-col items-center">
+          <p className="section-label mb-8">WHAT WE DO</p>
+          
+          <h1 className="text-6xl md:text-7xl font-serif text-ink-primary leading-tight mb-6 mt-16">
+            <span className="italic text-burnt">Understand</span> any codebase.<br />
+            Instantly.
           </h1>
-
-          <p
-            className="animate-fade-in"
-            style={{
-              fontSize: "1.1rem",
-              color: "var(--text-secondary)",
-              maxWidth: 520,
-              margin: "0 auto 2.5rem",
-              lineHeight: 1.7,
-            }}
-          >
-            YASML ingests your repository, builds a structural knowledge graph, and lets you ask
-            natural-language questions to navigate and understand your code instantly.
+          
+          <p className="text-lg md:text-xl font-serif text-ink-muted max-w-2xl leading-relaxed mb-10">
+            We don't treat code as text. We convert it into a structured graph of relationships, then use AI to generate meaningful explanations.
           </p>
 
-          {/* Feature pills */}
-          <div
-            className="animate-fade-in"
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              flexWrap: "wrap",
-              gap: "0.5rem",
-              marginBottom: "3rem",
-            }}
-          >
-            {[
-              { icon: <Network size={13} />, label: "Dependency Graph" },
-              { icon: <MessageSquare size={13} />, label: "NL Query" },
-              { icon: <Zap size={13} />, label: "Semantic Search" },
-              { icon: <GitBranch size={13} />, label: "AST Parsing" },
-            ].map((f) => (
-              <span
-                key={f.label}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  padding: "5px 14px",
-                  borderRadius: "999px",
-                  background: "var(--bg-card)",
-                  border: "1px solid var(--bg-card-border)",
-                  fontSize: "0.82rem",
-                  color: "var(--text-secondary)",
-                }}
+          <div className="flex flex-col items-center gap-4 mb-10 w-full max-w-lg">
+            {!showInput ? (
+              <div className="flex flex-col sm:flex-row items-center gap-4 w-full justify-center">
+                <input 
+                  type="file" 
+                  accept=".zip" 
+                  ref={fileInputRef} 
+                  onChange={handleZipUpload} 
+                  style={{ display: "none" }} 
+                />
+                <button 
+                  className="btn-primary" 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading}
+                >
+                  {loading ? "Uploading..." : "Upload (.zip)"}
+                </button>
+                <button className="btn-secondary" onClick={() => setShowInput(true)} disabled={loading}>
+                  Paste GitHub URL
+                </button>
+              </div>
+            ) : (
+              <form 
+                onSubmit={handleCreateRepo}
+                className="flex items-center w-full bg-warm-secondary border border-warm-divider rounded-full shadow-sm overflow-hidden p-1 relative"
               >
-                {f.icon} {f.label}
-              </span>
-            ))}
+                <input
+                  type="text"
+                  placeholder="https://github.com/user/repo"
+                  className="w-full bg-transparent outline-none px-5 py-2 font-mono text-sm text-ink-primary"
+                  value={repoUrl}
+                  onChange={(e) => setRepoUrl(e.target.value)}
+                  disabled={loading}
+                  autoFocus
+                />
+                <button 
+                  type="submit"
+                  disabled={loading}
+                  className="btn-primary shrink-0 rounded-full px-6 flex items-center h-full"
+                >
+                  {loading ? <div className="w-5 h-5 border-2 border-warm-primary border-t-transparent rounded-full animate-spin" /> : "Analyze"}
+                </button>
+              </form>
+            )}
+            
+            {error && <p className="text-error text-sm font-sans mt-2">{error}</p>}
           </div>
 
-          {/* Form / Progress */}
-          {activeStep === null && (
-            <div style={{ display: "flex", justifyContent: "center" }}>
-              <RepoConnectForm
-                onCreated={(repo) => {
-                  setActiveStep("form");
-                  handleRepoCreated(repo);
-                }}
-              />
-            </div>
-          )}
-          {activeStep === "form" && (
-            <div style={{ display: "flex", justifyContent: "center" }}>
-              <RepoConnectForm onCreated={handleRepoCreated} />
-            </div>
-          )}
-          {activeStep === "ingesting" && currentJob && currentRepo && (
-            <div style={{ display: "flex", justifyContent: "center" }}>
-              <IngestionProgress
-                jobId={currentJob.id}
-                repoId={currentRepo.id}
-                onComplete={handleIngestionComplete}
-                onError={(msg) => {
-                  console.error("Ingestion error:", msg);
-                  setActiveStep(null);
-                }}
-              />
-            </div>
-          )}
-
-          {activeStep === null && (
-            <button
-              className="btn btn-ghost animate-fade-in"
-              style={{ marginTop: "1rem" }}
-              onClick={() => setActiveStep("form")}
-            >
-              Connect a repository <ArrowRight size={14} />
-            </button>
-          )}
+          <div className="divider-line max-w-xs mb-4" />
+          <p className="text-xs font-sans text-ink-muted">No account required to explore</p>
         </div>
       </section>
 
-      {/* Repo list */}
-      {repos.length > 0 && (
-        <section className="page-container" style={{ paddingTop: "1rem" }}>
-          <div className="section-header">
-            <h3 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <FolderGit2 size={18} style={{ color: "var(--yasml-primary)" }} />
-              Your Repositories
-            </h3>
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: "0.8rem", padding: "0.4rem 1rem" }}
-              onClick={() => setActiveStep("form")}
-            >
-              + Add repository
-            </button>
-          </div>
-
-          <div className="grid-3" style={{ alignItems: "start" }}>
-            {repos.map((repo) => (
-              <div key={repo.id} className="card animate-fade-in" style={{ padding: "1.25rem" }}>
-                <div className="flex-between" style={{ marginBottom: "0.75rem" }}>
-                  <div className="flex-gap-2">
-                    <GitFork size={16} style={{ color: "var(--yasml-primary)" }} />
-                    <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{repo.name}</span>
-                  </div>
-                  <span className={`badge ${statusBadge[repo.status] ?? "badge-pending"}`}>
-                    {repo.status}
-                  </span>
+      {/* How It Works Section */}
+      <section className="py-24 px-6 bg-warm-primary border-t border-warm-divider">
+        <div className="max-w-6xl mx-auto">
+          <p className="section-label mb-16 text-center">HOW IT WORKS</p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12">
+            {[
+              { num: "01", title: "Upload", italic: "Upload,", titleRest: "not configure.", desc: "Paste a GitHub link or drag in a repo, zero setup." },
+              { num: "02", title: "Parse", italic: "Parse,", titleRest: "not read.", desc: "Tree-sitter extracts every function, class, import automatically." },
+              { num: "03", title: "Graph", italic: "Graph,", titleRest: "not list.", desc: "Relationships are mapped into a live dependency graph." },
+              { num: "04", title: "Ask", italic: "Ask,", titleRest: "not search.", desc: "Natural language queries answered with graph-aware AI." },
+            ].map((step) => (
+              <div key={step.num} className="relative flex flex-col group">
+                {/* Decorative numeric background */}
+                <div className="absolute -top-10 -left-4 text-8xl font-serif text-ink-label opacity-[0.06] select-none pointer-events-none transition-opacity group-hover:opacity-10">
+                  {step.num}
                 </div>
-
-                {/* Stats */}
-                {repo.status === "READY" && (
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "1rem",
-                      marginBottom: "0.75rem",
-                      fontSize: "0.8rem",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    <span>{repo.file_count} files</span>
-                    <span>{repo.function_count} functions</span>
-                  </div>
-                )}
-
-                {/* Language bar */}
-                {repo.status === "READY" && Object.keys(repo.language_breakdown).length > 0 && (
-                  <div
-                    style={{
-                      display: "flex",
-                      height: 4,
-                      borderRadius: 999,
-                      overflow: "hidden",
-                      marginBottom: "0.75rem",
-                    }}
-                  >
-                    {Object.entries(repo.language_breakdown).map(([lang, count]) => {
-                      const total = Object.values(repo.language_breakdown).reduce((a, b) => a + b, 0);
-                      return (
-                        <div
-                          key={lang}
-                          style={{
-                            width: `${(count / total) * 100}%`,
-                            background: langColor(lang),
-                          }}
-                          title={`${lang}: ${count} files`}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className="flex-between">
-                  <div className="flex-gap-2" style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                    <Clock size={12} />
-                    {relativeTime(repo.created_at)}
-                  </div>
-
-                  <div className="flex-gap-2">
-                    <button
-                      onClick={() => deleteRepo(repo.id)}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: "var(--text-muted)",
-                        cursor: "pointer",
-                        padding: 4,
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = "var(--error)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-
-                    {repo.status === "READY" && (
-                      <Link href={`/repos/${repo.id}`} className="btn btn-primary" style={{ padding: "0.3rem 0.75rem", fontSize: "0.8rem" }}>
-                        Explore <ArrowRight size={13} />
-                      </Link>
-                    )}
-                  </div>
-                </div>
+                
+                <h3 className="relative z-10 text-2xl font-serif text-ink-primary mb-4 transition-transform group-hover:translate-x-1 duration-300">
+                  <span className="italic text-burnt">{step.italic}</span> {step.titleRest}
+                </h3>
+                
+                <p className="relative z-10 font-serif text-ink-muted leading-relaxed mb-6 flex-1">
+                  {step.desc}
+                </p>
+                
+                <div className="divider-line transition-colors group-hover:bg-burnt/30" />
               </div>
             ))}
           </div>
-        </section>
-      )}
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section className="py-24 px-6 bg-warm-secondary border-t border-warm-divider">
+        <div className="max-w-5xl mx-auto">
+          <p className="section-label mb-16 text-center">WHY IT'S DIFFERENT</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+            {[
+              { rn: "I", title: "Function Tracing", desc: "Follow execution paths visually through your entire codebase without losing cognitive focus." },
+              { rn: "II", title: "Dependency Graph", desc: "See the blast radius of any change before making it. Instantly locate architectural bottlenecks." },
+              { rn: "III", title: "Impact Analysis", desc: "Query potential changes in plain English and get simulated impact assessments instantly." },
+            ].map((feat) => (
+              <div key={feat.rn} className="flex flex-col border-b border-warm-divider pb-8 transition-transform hover:-translate-y-1 duration-300">
+                <span className="font-serif text-burnt mb-6 text-sm">{feat.rn}</span>
+                <h4 className="font-serif text-xl text-ink-primary font-medium mb-4">{feat.title}</h4>
+                <p className="font-serif text-ink-muted leading-relaxed">{feat.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* Footer */}
-      <footer
-        style={{
-          marginTop: "auto",
-          borderTop: "1px solid var(--bg-card-border)",
-          padding: "1.5rem",
-          textAlign: "center",
-          fontSize: "0.78rem",
-          color: "var(--text-muted)",
-        }}
-      >
-        YASML · Codebase Intelligence Platform · Built for hackathon
+      <footer className="bg-ink-primary text-warm-primary py-12 px-6 relative overflow-hidden mt-auto">
+        <div className="absolute -bottom-16 left-1/2 -translate-x-1/2 text-[15rem] font-serif opacity-5 whitespace-nowrap pointer-events-none select-none">
+          YASML
+        </div>
+        <div className="relative z-10 max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex items-center gap-2 font-serif font-bold text-lg">
+            <Network size={18} className="text-burnt" />
+            <span>YASML</span>
+          </div>
+          
+          <div className="flex items-center gap-6 font-sans text-sm text-[rgba(245,240,232,0.6)]">
+            <Link href="#" className="hover:text-warm-primary transition-colors">Documentation</Link>
+            <Link href="#" className="hover:text-warm-primary transition-colors">GitHub</Link>
+            <Link href="#" className="hover:text-warm-primary transition-colors">Twitter</Link>
+          </div>
+          
+          <div className="font-sans text-[11px] text-[rgba(245,240,232,0.4)] tracking-wider uppercase">
+            © 2026 YASML Hackathon
+          </div>
+        </div>
       </footer>
     </div>
   );

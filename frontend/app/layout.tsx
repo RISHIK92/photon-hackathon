@@ -1,8 +1,16 @@
 import React from "react";
 import "./globals.css";
-import { Inter } from "next/font/google";
+import { Inter, Cormorant_Garamond, JetBrains_Mono } from "next/font/google";
+import Navbar from "@/components/Navbar";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const cormorant = Cormorant_Garamond({ 
+  subsets: ["latin"], 
+  weight: ["400", "500", "600", "700"], 
+  style: ["normal", "italic"],
+  variable: "--font-playfair" 
+});
+const jetbrains = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-jetbrains" });
 
 export const metadata = {
   title: "YASML — Codebase Intelligence Platform",
@@ -18,8 +26,11 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body>{children}</body>
+    <html lang="en" className={`${inter.variable} ${cormorant.variable} ${jetbrains.variable}`}>
+      <body>
+        <Navbar />
+        {children}
+      </body>
     </html>
   );
 }
