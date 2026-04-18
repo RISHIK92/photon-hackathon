@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Send, ThumbsUp, ThumbsDown, Network } from "lucide-react";
 import { api, type CitedChunk, type Pin as PinType } from "@/lib/api";
 import { readSSE } from "@/lib/sse";
+import React from "react";
 
 interface Message {
   role: "user" | "assistant";

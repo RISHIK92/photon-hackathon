@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import QueryPanel from "@/components/QueryPanel";
+import React from "react";
 
 export default function QueryPage() {
   const { id } = useParams<{ id: string }>();

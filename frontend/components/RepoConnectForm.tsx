@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Upload, FolderOpen, ArrowRight, Sparkles } from "lucide-react";
+import { Upload, FolderOpen, ArrowRight, Loader2 } from "lucide-react";
 import { api, type Repo, type RepoSourceType } from "@/lib/api";
 import React from "react";
 
@@ -25,10 +25,8 @@ export default function RepoConnectForm({ onCreated }: RepoConnectFormProps) {
     e.preventDefault();
     setError(null);
     setLoading(true);
-
     try {
       let repo: Repo;
-
       if (mode === "github") {
         const name = repoName || repoUrl.split("/").slice(-2).join("/");
         repo = await api.repos.create({
@@ -50,7 +48,6 @@ export default function RepoConnectForm({ onCreated }: RepoConnectFormProps) {
       } else {
         throw new Error("Please fill in all required fields.");
       }
-
       onCreated(repo);
     } catch (err) {
       setError((err as Error).message);
@@ -60,237 +57,141 @@ export default function RepoConnectForm({ onCreated }: RepoConnectFormProps) {
   }
 
   const tabs: { label: string; mode: Mode; icon: React.ReactNode }[] = [
-    { label: "GitHub", mode: "github", icon: <Upload size={15} /> },
-    { label: "ZIP Archive", mode: "zip", icon: <Upload size={15} /> },
-    { label: "Local Path", mode: "local", icon: <FolderOpen size={15} /> },
+    { label: "GitHub", mode: "github", icon: <Upload size={13} /> },
+    { label: "ZIP Archive", mode: "zip", icon: <Upload size={13} /> },
+    { label: "Local Path", mode: "local", icon: <FolderOpen size={13} /> },
   ];
 
-  return (
-    <div
-      className="card animate-fade-in"
-      style={{ maxWidth: 560, width: "100%", padding: "2rem" }}
-    >
-      {/* Header */}
-      <div style={{ marginBottom: "1.5rem", textAlign: "center" }}>
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 48,
-            height: 48,
-            borderRadius: "var(--radius-lg)",
-            background: "rgba(99,102,241,0.15)",
-            border: "1px solid rgba(99,102,241,0.25)",
-            marginBottom: "0.75rem",
-          }}
-        >
-          <Sparkles size={22} style={{ color: "var(--yasml-primary)" }} />
-        </div>
-        <h2 style={{ marginBottom: "0.35rem" }}>Connect a Repository</h2>
-        <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-          YASML will parse, graph, and index your codebase for natural-language
-          exploration.
-        </p>
-      </div>
+  const labelCls =
+    "block text-[10px] font-sans font-semibold text-ink-secondary tracking-widest uppercase mb-1.5";
+  const inputCls =
+    "w-full bg-transparent border border-warm-divider rounded-sm text-ink-primary text-sm px-3 py-2 outline-none transition-colors placeholder:text-ink-muted focus:border-burnt font-sans";
 
-      {/* Mode selector */}
-      <div className="tab-bar" style={{ marginBottom: "1.5rem" }}>
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+      {/* Mode tabs */}
+      <div className="flex gap-0 border border-warm-divider rounded-sm overflow-hidden w-fit">
         {tabs.map((t) => (
           <button
             key={t.mode}
-            className={`tab ${mode === t.mode ? "active" : ""}`}
-            onClick={() => setMode(t.mode)}
             type="button"
-            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+            onClick={() => setMode(t.mode)}
+            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-sans transition-colors ${
+              mode === t.mode
+                ? "bg-burnt text-white"
+                : "text-ink-muted hover:text-ink-primary hover:bg-warm-tertiary"
+            }`}
           >
-            {t.icon} {t.label}
+            {t.icon}
+            {t.label}
           </button>
         ))}
       </div>
 
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", flexDirection: "column", gap: "1rem" }}
-      >
-        {/* Repo name (always shown) */}
+      {/* Repo name */}
+      <div>
+        <label className={labelCls}>
+          Repository Name{" "}
+          <span className="normal-case text-ink-muted font-normal">
+            (optional)
+          </span>
+        </label>
+        <input
+          className={inputCls}
+          placeholder="e.g. my-awesome-project"
+          value={repoName}
+          onChange={(e) => setRepoName(e.target.value)}
+        />
+      </div>
+
+      {/* Mode-specific field */}
+      {mode === "github" && (
         <div>
-          <label
-            style={{
-              display: "block",
-              fontSize: "0.8rem",
-              fontWeight: 600,
-              color: "var(--text-secondary)",
-              marginBottom: "0.4rem",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-            }}
-          >
-            Repository Name{" "}
-            <span style={{ color: "var(--text-muted)" }}>(optional)</span>
+          <label className={labelCls}>
+            GitHub URL <span className="text-burnt">*</span>
           </label>
           <input
-            id="repo-name"
-            className="input"
-            placeholder="e.g. my-awesome-project"
-            value={repoName}
-            onChange={(e) => setRepoName(e.target.value)}
+            className={inputCls}
+            placeholder="https://github.com/owner/repo"
+            value={repoUrl}
+            onChange={(e) => setRepoUrl(e.target.value)}
+            required
+            type="url"
           />
         </div>
+      )}
 
-        {/* Mode-specific field */}
-        {mode === "github" && (
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: "0.8rem",
-                fontWeight: 600,
-                color: "var(--text-secondary)",
-                marginBottom: "0.4rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-              }}
-            >
-              GitHub URL *
-            </label>
-            <input
-              id="github-url"
-              className="input"
-              placeholder="https://github.com/owner/repo"
-              value={repoUrl}
-              onChange={(e) => setRepoUrl(e.target.value)}
-              required
-              type="url"
-            />
-          </div>
-        )}
+      {mode === "local" && (
+        <div>
+          <label className={labelCls}>
+            Absolute Path <span className="text-burnt">*</span>
+          </label>
+          <input
+            className={inputCls}
+            placeholder="/home/user/projects/myrepo"
+            value={localPath}
+            onChange={(e) => setLocalPath(e.target.value)}
+            required
+          />
+        </div>
+      )}
 
-        {mode === "local" && (
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: "0.8rem",
-                fontWeight: 600,
-                color: "var(--text-secondary)",
-                marginBottom: "0.4rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-              }}
-            >
-              Absolute Path *
-            </label>
-            <input
-              id="local-path"
-              className="input"
-              placeholder="/home/user/projects/myrepo"
-              value={localPath}
-              onChange={(e) => setLocalPath(e.target.value)}
-              required
-            />
-          </div>
-        )}
-
-        {mode === "zip" && (
-          <div>
-            <label
-              style={{
-                display: "block",
-                fontSize: "0.8rem",
-                fontWeight: 600,
-                color: "var(--text-secondary)",
-                marginBottom: "0.4rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-              }}
-            >
-              ZIP File *
-            </label>
-            <div
-              onClick={() => fileRef.current?.click()}
-              style={{
-                border: "2px dashed rgba(255,255,255,0.1)",
-                borderRadius: "var(--radius-md)",
-                padding: "1.5rem",
-                textAlign: "center",
-                cursor: "pointer",
-                transition: "border-color 0.15s",
-                color: zipFile ? "var(--text-primary)" : "var(--text-muted)",
-                fontSize: "0.875rem",
-              }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.borderColor = "var(--yasml-primary)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")
-              }
-            >
-              <Upload
-                size={24}
-                style={{
-                  margin: "0 auto 0.5rem",
-                  opacity: 0.5,
-                  display: "block",
-                }}
-              />
-              {zipFile ? zipFile.name : "Drop ZIP here or click to browse"}
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".zip"
-              style={{ display: "none" }}
-              onChange={(e) => setZipFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
+      {mode === "zip" && (
+        <div>
+          <label className={labelCls}>
+            ZIP File <span className="text-burnt">*</span>
+          </label>
           <div
-            style={{
-              padding: "0.75rem 1rem",
-              borderRadius: "var(--radius-md)",
-              background: "rgba(239,68,68,0.1)",
-              border: "1px solid rgba(239,68,68,0.2)",
-              color: "var(--error)",
-              fontSize: "0.875rem",
-            }}
+            onClick={() => fileRef.current?.click()}
+            className={`border-2 border-dashed rounded-sm p-6 text-center cursor-pointer transition-colors ${
+              zipFile
+                ? "border-burnt/50 bg-burnt/5"
+                : "border-warm-divider hover:border-burnt/40"
+            }`}
           >
-            {error}
+            <Upload size={20} className="mx-auto mb-2 text-ink-muted" />
+            <p className="text-sm font-sans text-ink-muted">
+              {zipFile ? (
+                <span className="text-ink-primary font-medium">
+                  {zipFile.name}
+                </span>
+              ) : (
+                "Drop ZIP here or click to browse"
+              )}
+            </p>
           </div>
-        )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".zip"
+            className="hidden"
+            onChange={(e) => setZipFile(e.target.files?.[0] ?? null)}
+          />
+        </div>
+      )}
 
-        <button
-          id="connect-repo-btn"
-          type="submit"
-          className="btn btn-accent"
-          disabled={loading}
-          style={{ width: "100%", justifyContent: "center", padding: "0.7rem" }}
-        >
-          {loading ? (
-            <>
-              <span
-                style={{
-                  width: 16,
-                  height: 16,
-                  border: "2px solid rgba(255,255,255,0.3)",
-                  borderTopColor: "#fff",
-                  borderRadius: "50%",
-                  display: "inline-block",
-                }}
-                className="animate-spin"
-              />
-              Connecting...
-            </>
-          ) : (
-            <>
-              Start Ingestion <ArrowRight size={16} />
-            </>
-          )}
-        </button>
-      </form>
-    </div>
+      {/* Error */}
+      {error && (
+        <p className="text-sm font-sans text-red-600 bg-red-50 border border-red-200 rounded-sm px-3 py-2">
+          {error}
+        </p>
+      )}
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="btn-primary flex items-center justify-center gap-2 py-2.5 disabled:opacity-60"
+      >
+        {loading ? (
+          <>
+            <Loader2 size={15} className="animate-spin" /> Connecting…
+          </>
+        ) : (
+          <>
+            Start Ingestion <ArrowRight size={15} />
+          </>
+        )}
+      </button>
+    </form>
   );
 }

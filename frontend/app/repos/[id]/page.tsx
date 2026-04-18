@@ -14,6 +14,7 @@ import {
 import { api, type Repo, type Job, type Pin, type EntryPoint } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
 import IngestionProgress from "@/components/IngestionProgress";
+import React from "react";
 
 export default function RepoDashboard() {
   const { id } = useParams<{ id: string }>();

@@ -9,10 +9,11 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
+  Loader2,
 } from "lucide-react";
 import type { GraphNode, ImpactAnalysis } from "@/lib/api";
 import { api } from "@/lib/api";
-import { formatBytes, langColor } from "@/lib/utils";
+import { langColor } from "@/lib/utils";
 import React from "react";
 
 interface GraphContextPanelProps {
@@ -21,10 +22,30 @@ interface GraphContextPanelProps {
   onNavigate?: (path: string) => void;
 }
 
-const RISK_COLORS: Record<string, string> = {
-  LOW: "#10b981",
-  MEDIUM: "#f59e0b",
-  HIGH: "#ef4444",
+const RISK_COLORS: Record<
+  string,
+  { bg: string; text: string; border: string }
+> = {
+  LOW: {
+    bg: "bg-emerald-500/10",
+    text: "text-emerald-600",
+    border: "border-emerald-500/30",
+  },
+  MEDIUM: {
+    bg: "bg-amber-500/10",
+    text: "text-amber-600",
+    border: "border-amber-500/30",
+  },
+  HIGH: {
+    bg: "bg-red-500/10",
+    text: "text-red-600",
+    border: "border-red-500/30",
+  },
+};
+const RISK_BAR: Record<string, string> = {
+  LOW: "bg-emerald-500",
+  MEDIUM: "bg-amber-500",
+  HIGH: "bg-red-500",
 };
 
 function ImpactPanel({ repoId, nodeId }: { repoId: string; nodeId: string }) {
@@ -39,111 +60,58 @@ function ImpactPanel({ repoId, nodeId }: { repoId: string; nodeId: string }) {
     api.graph
       .getImpact(repoId, nodeId)
       .then(setImpact)
+      .catch(() => setImpact(null))
       .finally(() => setLoading(false));
   }, [repoId, nodeId]);
 
   if (loading)
     return (
-      <p
-        style={{
-          fontSize: "0.8rem",
-          color: "var(--text-muted)",
-          padding: "0.5rem 0",
-        }}
-      >
-        Analysing impact...
+      <div className="flex items-center gap-2 text-ink-muted text-sm font-sans py-2">
+        <Loader2 size={13} className="animate-spin" /> Analysing impact…
+      </div>
+    );
+  if (!impact)
+    return (
+      <p className="text-ink-muted text-sm font-serif italic">
+        No impact data available.
       </p>
     );
-  if (!impact) return null;
 
-  const riskColor = RISK_COLORS[impact.risk_level] ?? "#6366f1";
-  const scorePercent = impact.impact_score;
+  const risk = RISK_COLORS[impact.risk_level] ?? RISK_COLORS.MEDIUM;
+  const bar = RISK_BAR[impact.risk_level] ?? RISK_BAR.MEDIUM;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      {/* Score bar — percentile rank within repo */}
+    <div className="flex flex-col gap-4">
+      {/* Score bar */}
       <div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "0.25rem",
-          }}
-        >
-          <span
-            style={{
-              fontSize: "0.72rem",
-              fontWeight: 700,
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.07em",
-            }}
-          >
-            Repo Percentile
-          </span>
-          <span style={{ fontSize: "1rem", fontWeight: 700, color: riskColor }}>
+        <div className="flex justify-between items-center mb-1">
+          <span className="section-label">REPO PERCENTILE</span>
+          <span className={`text-base font-bold ${risk.text}`}>
             {impact.impact_score}
-            <span style={{ fontSize: "0.72rem", opacity: 0.7 }}>th</span>
+            <span className="text-[10px] opacity-70">th</span>
           </span>
         </div>
-        <div
-          style={{
-            height: 8,
-            borderRadius: 4,
-            background: "var(--bg-elevated)",
-            overflow: "hidden",
-          }}
-        >
+        <div className="h-2 rounded-full bg-warm-divider overflow-hidden">
           <div
-            style={{
-              height: "100%",
-              width: `${impact.impact_score}%`,
-              background: riskColor,
-              borderRadius: 4,
-              transition: "width 0.5s ease",
-            }}
+            className={`h-full rounded-full transition-all duration-500 ${bar}`}
+            style={{ width: `${impact.impact_score}%` }}
           />
         </div>
-        <p
-          style={{
-            fontSize: "0.68rem",
-            color: "var(--text-muted)",
-            marginTop: "0.25rem",
-          }}
-        >
+        <p className="text-[11px] text-ink-muted mt-1">
           More critical than {impact.impact_score}% of{" "}
-          {impact.total_modules_in_repo} modules in this repo
+          {impact.total_modules_in_repo} modules
         </p>
       </div>
 
       {/* Risk badge */}
-      <div
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "0.4rem",
-          padding: "0.3rem 0.75rem",
-          borderRadius: "999px",
-          background: `${riskColor}22`,
-          border: `1px solid ${riskColor}55`,
-          fontSize: "0.8rem",
-          fontWeight: 700,
-          color: riskColor,
-          alignSelf: "flex-start",
-        }}
+      <span
+        className={`inline-flex items-center gap-1.5 self-start px-3 py-1 rounded-full text-xs font-bold border ${risk.bg} ${risk.text} ${risk.border}`}
       >
         {impact.risk_emoji} {impact.risk_level} RISK
-      </div>
+      </span>
 
       {/* Metric cards */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "0.4rem",
-        }}
-      >
+      <div className="grid grid-cols-2 gap-2">
         {[
           { label: "Affected", value: impact.metrics.affected_count },
           { label: "Dependents", value: impact.metrics.upstream_count },
@@ -153,26 +121,10 @@ function ImpactPanel({ repoId, nodeId }: { repoId: string; nodeId: string }) {
         ].map(({ label, value }) => (
           <div
             key={label}
-            className="stat-card"
-            style={{ padding: "0.5rem 0.6rem" }}
+            className="bg-warm-primary border border-warm-divider rounded-sm p-2.5"
           >
-            <div
-              style={{
-                fontSize: "1.1rem",
-                fontWeight: 700,
-                color: "var(--text-primary)",
-              }}
-            >
-              {value}
-            </div>
-            <div
-              style={{
-                fontSize: "0.68rem",
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.07em",
-              }}
-            >
+            <div className="text-lg font-bold text-ink-primary">{value}</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-muted">
               {label}
             </div>
           </div>
@@ -180,83 +132,32 @@ function ImpactPanel({ repoId, nodeId }: { repoId: string; nodeId: string }) {
       </div>
 
       {/* Explanation */}
-      <p
-        style={{
-          fontSize: "0.77rem",
-          color: "var(--text-secondary)",
-          lineHeight: 1.5,
-          margin: 0,
-        }}
-      >
+      <p className="text-xs text-ink-secondary font-serif leading-relaxed">
         {impact.explanation}
       </p>
 
-      {/* Affected nodes collapsible */}
+      {/* Downstream */}
       {impact.affected_nodes.length > 0 && (
         <div>
           <button
             onClick={() => setShowAffected((v) => !v)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.07em",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-            }}
+            className="flex items-center gap-1.5 section-label text-ink-muted hover:text-ink-primary"
           >
             <ArrowDownToLine size={11} /> Downstream (
             {impact.affected_nodes.length})
             {showAffected ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
           </button>
           {showAffected && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 3,
-                marginTop: "0.4rem",
-              }}
-            >
+            <div className="flex flex-col gap-1 mt-2">
               {impact.affected_nodes.map((n) => (
                 <div
                   key={n.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    background: "#ef444411",
-                    border: "1px solid #ef444433",
-                    borderRadius: "var(--radius-sm)",
-                    padding: "3px 8px",
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: "0.72rem",
-                    color: "#ef4444",
-                  }}
+                  className="flex items-center justify-between bg-red-500/5 border border-red-500/20 rounded-sm px-2 py-1"
                 >
-                  <span
-                    style={{
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+                  <span className="font-mono text-[11px] text-red-600 truncate">
                     {n.path.split("/").pop()}
                   </span>
-                  <span
-                    style={{
-                      fontSize: "0.65rem",
-                      opacity: 0.7,
-                      flexShrink: 0,
-                      marginLeft: 6,
-                    }}
-                  >
+                  <span className="text-[10px] text-ink-muted shrink-0 ml-2">
                     depth {n.depth}
                   </span>
                 </div>
@@ -266,54 +167,23 @@ function ImpactPanel({ repoId, nodeId }: { repoId: string; nodeId: string }) {
         </div>
       )}
 
-      {/* Upstream nodes collapsible */}
+      {/* Upstream */}
       {impact.upstream_nodes.length > 0 && (
         <div>
           <button
             onClick={() => setShowUpstream((v) => !v)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.07em",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-            }}
+            className="flex items-center gap-1.5 section-label text-ink-muted hover:text-ink-primary"
           >
             <ArrowUpToLine size={11} /> Dependents (
             {impact.upstream_nodes.length})
             {showUpstream ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
           </button>
           {showUpstream && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 3,
-                marginTop: "0.4rem",
-              }}
-            >
+            <div className="flex flex-col gap-1 mt-2">
               {impact.upstream_nodes.map((n) => (
                 <div
                   key={n.id}
-                  style={{
-                    background: "#f59e0b11",
-                    border: "1px solid #f59e0b33",
-                    borderRadius: "var(--radius-sm)",
-                    padding: "3px 8px",
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: "0.72rem",
-                    color: "#f59e0b",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
+                  className="bg-amber-500/5 border border-amber-500/20 rounded-sm px-2 py-1 font-mono text-[11px] text-amber-600 truncate"
                 >
                   {n.path.split("/").pop()}
                 </div>
@@ -324,12 +194,6 @@ function ImpactPanel({ repoId, nodeId }: { repoId: string; nodeId: string }) {
       )}
     </div>
   );
-}
-
-interface GraphContextPanelProps {
-  repoId: string;
-  node: GraphNode | null;
-  onNavigate?: (path: string) => void;
 }
 
 export default function GraphContextPanel({
@@ -346,28 +210,31 @@ export default function GraphContextPanel({
     if (!node) return;
     setTab("deps");
     setLoading(true);
-    // Fetch subgraph to get neighbors
     api.graph
       .getSubgraph(repoId, node.id)
       .then((data) => {
-        const others = data.nodes.filter((n) => n.id !== node.id);
         const edgeTargets = new Set(
           data.edges.filter((e) => e.source === node.id).map((e) => e.target),
         );
         const edgeSources = new Set(
           data.edges.filter((e) => e.target === node.id).map((e) => e.source),
         );
+        const others = data.nodes.filter((n) => n.id !== node.id);
         setImportees(others.filter((n) => edgeTargets.has(n.id)));
         setImporters(others.filter((n) => edgeSources.has(n.id)));
+      })
+      .catch(() => {
+        setImporters([]);
+        setImportees([]);
       })
       .finally(() => setLoading(false));
   }, [node, repoId]);
 
   if (!node) {
     return (
-      <div className="empty-state" style={{ padding: "2rem" }}>
-        <GitBranch size={28} style={{ opacity: 0.3 }} />
-        <p style={{ fontSize: "0.82rem" }}>Click a node to inspect it</p>
+      <div className="flex flex-col items-center justify-center p-8 gap-3 text-ink-muted">
+        <GitBranch size={28} className="opacity-30" />
+        <p className="text-sm font-serif italic">Click a node to inspect it</p>
       </div>
     );
   }
@@ -375,103 +242,65 @@ export default function GraphContextPanel({
   const color = langColor(node.language);
 
   return (
-    <div
-      style={{
-        padding: "1rem",
-        display: "flex",
-        flexDirection: "column",
-        gap: "1rem",
-      }}
-    >
+    <div className="flex flex-col gap-5 p-5">
       {/* Node header */}
       <div>
-        <div className="flex-gap-2" style={{ marginBottom: "0.5rem" }}>
+        <div className="flex items-center gap-2 mb-1">
           <span
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: "50%",
-              background: color,
-              flexShrink: 0,
-            }}
+            className="w-2.5 h-2.5 rounded-full shrink-0"
+            style={{ background: color }}
           />
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: "0.82rem",
-              color: "var(--text-primary)",
-              fontWeight: 600,
-            }}
-          >
-            {node.label}
+          <span className="font-mono text-sm text-ink-primary font-semibold truncate">
+            {node.label || node.path.split("/").pop()}
           </span>
         </div>
-        <p
-          style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: "0.72rem",
-            color: "var(--text-muted)",
-            wordBreak: "break-all",
-          }}
-        >
+        <p className="font-mono text-[11px] text-ink-muted break-all leading-relaxed">
           {node.path}
         </p>
       </div>
 
       {/* Stats */}
-      <div className="grid-2" style={{ gap: "0.5rem" }}>
-        <div className="stat-card" style={{ padding: "0.75rem" }}>
-          <div className="stat-value" style={{ fontSize: "1.25rem" }}>
-            {node.language}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-warm-primary border border-warm-divider rounded-sm p-2.5">
+          <div className="text-sm font-bold text-ink-primary">
+            {node.language || "—"}
           </div>
-          <div className="stat-label">Language</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-muted">
+            Language
+          </div>
         </div>
-        <div className="stat-card" style={{ padding: "0.75rem" }}>
-          <div className="stat-value" style={{ fontSize: "1.25rem" }}>
-            {formatBytes(node.size_bytes)}
+        <div className="bg-warm-primary border border-warm-divider rounded-sm p-2.5">
+          <div className="text-sm font-bold text-ink-primary">
+            {node.size_bytes
+              ? `${(node.size_bytes / 1024).toFixed(1)} KB`
+              : "—"}
           </div>
-          <div className="stat-label">File size</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-muted">
+            File size
+          </div>
         </div>
       </div>
 
-      {/* Open file */}
+      {/* Open file button */}
       <button
-        className="btn btn-ghost"
-        style={{ justifyContent: "center" }}
+        className="flex items-center justify-center gap-2 w-full border border-warm-divider rounded-sm py-1.5 text-xs font-sans text-ink-muted hover:text-burnt hover:border-burnt transition-colors"
         onClick={() => onNavigate?.(node.path)}
       >
-        <ExternalLink size={14} /> View File
+        <ExternalLink size={12} /> View File
       </button>
 
       {/* Tab switcher */}
-      <div
-        style={{
-          display: "flex",
-          borderRadius: "var(--radius-sm)",
-          overflow: "hidden",
-          border: "1px solid var(--bg-card-border)",
-        }}
-      >
+      <div className="flex rounded-sm overflow-hidden border border-warm-divider">
         {(["deps", "impact"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            style={{
-              flex: 1,
-              padding: "0.4rem",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.07em",
-              border: "none",
-              cursor: "pointer",
-              background: tab === t ? "var(--accent)" : "var(--bg-elevated)",
-              color: tab === t ? "#fff" : "var(--text-muted)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "0.3rem",
-            }}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors
+              ${
+                tab === t
+                  ? "bg-burnt text-warm-primary"
+                  : "bg-warm-primary text-ink-muted hover:text-ink-primary"
+              }`}
           >
             {t === "deps" ? <GitBranch size={11} /> : <Zap size={11} />}
             {t === "deps" ? "Deps" : "Impact"}
@@ -481,121 +310,65 @@ export default function GraphContextPanel({
 
       {tab === "deps" && (
         <>
-          <div className="divider" />
-          {/* Importers */}
+          <div className="divider-line" />
+
+          {/* Imported By */}
           <div>
-            <div
-              className="flex-gap-2"
-              style={{
-                marginBottom: "0.5rem",
-                color: "var(--text-muted)",
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-              }}
-            >
-              <ArrowDownToLine size={12} /> Imported by ({importers.length})
+            <div className="flex items-center gap-1.5 section-label mb-3">
+              <ArrowDownToLine size={12} /> IMPORTED BY ({importers.length})
             </div>
             {loading ? (
-              <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                Loading...
-              </p>
+              <div className="flex items-center gap-2 text-ink-muted text-xs font-sans">
+                <Loader2 size={12} className="animate-spin" /> Loading…
+              </div>
             ) : importers.length === 0 ? (
-              <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                No importers found
+              <p className="font-serif italic text-ink-muted text-xs">
+                — Not actively imported —
               </p>
             ) : (
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: "4px" }}
-              >
+              <div className="flex flex-col gap-1.5">
                 {importers.map((n) => (
                   <button
                     key={n.id}
                     onClick={() => onNavigate?.(n.path)}
-                    style={{
-                      textAlign: "left",
-                      background: "var(--bg-elevated)",
-                      border: "1px solid var(--bg-card-border)",
-                      borderRadius: "var(--radius-sm)",
-                      padding: "4px 8px",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: "0.75rem",
-                      color: "var(--text-secondary)",
-                      cursor: "pointer",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.color = "var(--text-primary)")
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.color = "var(--text-secondary)")
-                    }
+                    className="text-left bg-warm-primary border border-warm-divider rounded-sm px-3 py-1.5 font-mono text-[11px] text-ink-secondary hover:text-burnt hover:border-burnt/40 transition-colors truncate"
                   >
-                    {n.label}
+                    {n.label || n.path.split("/").pop()}
+                    <span className="text-ink-muted text-[10px] ml-1 font-sans">
+                      {n.path.includes("/")
+                        ? n.path.split("/").slice(0, -1).join("/") + "/"
+                        : ""}
+                    </span>
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="divider" />
+          <div className="divider-line" />
 
-          {/* Importees */}
+          {/* Imports */}
           <div>
-            <div
-              className="flex-gap-2"
-              style={{
-                marginBottom: "0.5rem",
-                color: "var(--text-muted)",
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-              }}
-            >
-              <ArrowUpToLine size={12} /> Imports ({importees.length})
+            <div className="flex items-center gap-1.5 section-label mb-3">
+              <ArrowUpToLine size={12} /> IMPORTS ({importees.length})
             </div>
             {loading ? (
-              <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                Loading...
-              </p>
+              <div className="flex items-center gap-2 text-ink-muted text-xs font-sans">
+                <Loader2 size={12} className="animate-spin" /> Loading…
+              </div>
             ) : importees.length === 0 ? (
-              <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                No imports found
+              <p className="font-serif italic text-ink-muted text-xs">
+                — No outgoing imports —
               </p>
             ) : (
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: "4px" }}
-              >
+              <div className="flex flex-col gap-1.5">
                 {importees.map((n) => (
                   <button
                     key={n.id}
                     onClick={() => onNavigate?.(n.path)}
-                    style={{
-                      textAlign: "left",
-                      background: "var(--bg-elevated)",
-                      border: "1px solid var(--bg-card-border)",
-                      borderRadius: "var(--radius-sm)",
-                      padding: "4px 8px",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: "0.75rem",
-                      color: "var(--text-secondary)",
-                      cursor: "pointer",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.color = "var(--text-primary)")
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.color = "var(--text-secondary)")
-                    }
+                    className="text-left bg-warm-primary border border-warm-divider rounded-sm px-3 py-1.5 font-mono text-[11px] text-ink-secondary hover:text-burnt hover:border-burnt/40 transition-colors truncate"
                   >
-                    {n.label}
+                    {n.label || n.path.split("/").pop()}
                   </button>
                 ))}
               </div>
@@ -606,7 +379,7 @@ export default function GraphContextPanel({
 
       {tab === "impact" && (
         <>
-          <div className="divider" />
+          <div className="divider-line" />
           <ImpactPanel repoId={repoId} nodeId={node.id} />
         </>
       )}
