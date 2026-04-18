@@ -6,6 +6,27 @@ from sqlmodel import Field, SQLModel, Column, JSON, Relationship
 from sqlalchemy import String, ForeignKey
 
 
+# ─── User ─────────────────────────────────────────────────────────────────────
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+    id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    email: str = Field(sa_column=Column(String, unique=True, nullable=False, index=True))
+    hashed_password: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class UserCreate(SQLModel):
+    email: str
+    password: str
+
+
+class UserRead(SQLModel):
+    id: str
+    email: str
+    created_at: datetime
+
+
 # ─── Enums ────────────────────────────────────────────────────────────────────
 
 class RepoStatus(str, Enum):
@@ -58,6 +79,7 @@ class RepoBase(SQLModel):
 class Repo(RepoBase, table=True):
     __tablename__ = "repos"
     id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    owner_id: Optional[str] = Field(default=None, sa_column=Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True))
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     jobs: List["Job"] = Relationship(back_populates="repo", sa_relationship_kwargs={"cascade": "all, delete-orphan"})
@@ -72,6 +94,7 @@ class RepoCreate(SQLModel):
 
 class RepoRead(RepoBase):
     id: str
+    owner_id: Optional[str]
     created_at: datetime
     updated_at: datetime
 

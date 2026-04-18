@@ -65,6 +65,23 @@ async def get_subgraph(
     }
 
 
+@router.get("/{repo_id}/entry-points")
+async def get_entry_points(
+    repo_id: str,
+    limit: int = Query(default=8, ge=1, le=20),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return modules with zero fan-in — the natural entry points of the repo."""
+    repo = await session.get(Repo, repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    client = Neo4jClient()
+    result = await client.get_entry_points(repo_id, limit=limit)
+    await client.close()
+    return result
+
+
 @router.get("/{repo_id}/impact/{node_id:path}")
 async def get_impact(
     repo_id: str,

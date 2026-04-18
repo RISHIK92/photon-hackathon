@@ -285,6 +285,53 @@ class Neo4jClient:
             )
             return [dict(r) for r in await result.data()]
 
+    async def get_entry_points(self, repo_id: str, limit: int = 8) -> list[dict]:
+        """
+        Return modules that are NOT imported by any other module in this repo
+        (fan-in = 0), i.e. the natural entry points / top-level files.
+        For each, also fetch up to 3 of its defined symbols (functions/classes).
+        """
+        async with self._driver.session() as s:
+            result = await s.run(
+                """
+                MATCH (m:Module {repo_id: $repo_id})
+                WHERE NOT EXISTS {
+                    MATCH (:Module {repo_id: $repo_id})-[:IMPORTS]->(m)
+                }
+                // Prefer files that actually export symbols
+                OPTIONAL MATCH (m)-[:DEFINES]->(sym:Symbol)
+                WITH m,
+                     count(sym) AS sym_count,
+                     collect(sym.name)[0..3] AS top_symbols
+                // Prefer files that import others (real entry files, not leaf utils with no imports)
+                OPTIONAL MATCH (m)-[:IMPORTS]->(:Module {repo_id: $repo_id})
+                WITH m, sym_count, top_symbols, count(*) AS fan_out
+                ORDER BY fan_out DESC, sym_count DESC
+                LIMIT $limit
+                RETURN m.node_id  AS id,
+                       m.path     AS path,
+                       m.language AS language,
+                       sym_count,
+                       top_symbols,
+                       fan_out
+                """,
+                repo_id=repo_id,
+                limit=limit,
+            )
+            rows = await result.data()
+
+        return [
+            {
+                "id": r["id"],
+                "path": r["path"],
+                "language": r["language"],
+                "sym_count": r["sym_count"],
+                "top_symbols": r["top_symbols"] or [],
+                "fan_out": r["fan_out"],
+            }
+            for r in rows
+        ]
+
     async def analyze_impact(self, node_id: str, repo_id: str) -> dict:
         """
         Compute impact analysis for a module node, scored relative to the

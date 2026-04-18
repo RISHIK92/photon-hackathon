@@ -9,27 +9,23 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
 from app.database import get_session
-from app.models import Repo, RepoCreate, RepoRead, RepoStatus, RepoSourceType, Job
+from app.models import Repo, RepoCreate, RepoRead, RepoStatus, RepoSourceType, Job, User
 from app.config import get_settings
 from app.tasks.ingestion import run_ingestion
+from app.core.auth import get_current_user
 
 router = APIRouter()
 settings = get_settings()
-
-
-def verify_api_key(x_api_key: str = Header(...)):
-    if x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 @router.post("", response_model=RepoRead, status_code=201)
 async def create_repo(
     payload: RepoCreate,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(verify_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Connect a repository (GitHub URL or local path)."""
-    repo = Repo(**payload.model_dump())
+    repo = Repo(**payload.model_dump(), owner_id=current_user.id)
     session.add(repo)
     await session.commit()
     await session.refresh(repo)
@@ -54,13 +50,13 @@ async def upload_zip(
     name: str = Form(...),
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(verify_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     """Upload a ZIP archive for ingestion."""
     storage = settings.repos_storage_path
 
     # Save zip metadata
-    repo = Repo(name=name, source_type=RepoSourceType.ZIP)
+    repo = Repo(name=name, source_type=RepoSourceType.ZIP, owner_id=current_user.id)
     session.add(repo)
     await session.commit()
     await session.refresh(repo)
@@ -90,17 +86,27 @@ async def upload_zip(
 
 
 @router.get("", response_model=list[RepoRead])
-async def list_repos(session: AsyncSession = Depends(get_session)):
-    # FIX APPLIED HERE: use execute() and scalars().all()
-    result = await session.execute(select(Repo).order_by(Repo.created_at.desc()))
+async def list_repos(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    result = await session.execute(
+        select(Repo).where(Repo.owner_id == current_user.id).order_by(Repo.created_at.desc())
+    )
     return result.scalars().all()
 
 
 @router.get("/{repo_id}", response_model=RepoRead)
-async def get_repo(repo_id: str, session: AsyncSession = Depends(get_session)):
+async def get_repo(
+    repo_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     repo = await session.get(Repo, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repo not found")
+    if repo.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
     return repo
 
 
@@ -108,10 +114,12 @@ async def get_repo(repo_id: str, session: AsyncSession = Depends(get_session)):
 async def delete_repo(
     repo_id: str,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(verify_api_key),
+    current_user: User = Depends(get_current_user),
 ):
     repo = await session.get(Repo, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repo not found")
+    if repo.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
     await session.delete(repo)
     await session.commit()

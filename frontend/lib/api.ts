@@ -3,13 +3,15 @@
  * All requests are routed through the NEXT_PUBLIC_API_URL env var.
  */
 
+import { getToken } from "./auth";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "yasml-dev-key";
 
 function headers(extra?: Record<string, string>): HeadersInit {
+  const token = getToken();
   return {
     "Content-Type": "application/json",
-    "x-api-key": API_KEY,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...extra,
   };
 }
@@ -130,6 +132,15 @@ export interface Pin {
   created_at: string;
 }
 
+export interface EntryPoint {
+  id: string;
+  path: string;
+  language: string;
+  sym_count: number;
+  top_symbols: string[];
+  fan_out: number;
+}
+
 // ─── Repos ────────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -163,9 +174,10 @@ export const api = {
       const form = new FormData();
       form.append("name", name);
       form.append("file", file);
+      const token = getToken();
       const res = await fetch(`${BASE}/api/repos/upload`, {
         method: "POST",
-        headers: { "x-api-key": API_KEY },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: form,
       });
       return handleResponse<Repo>(res);
@@ -219,6 +231,14 @@ export const api = {
         { headers: headers() },
       );
       return handleResponse<ImpactAnalysis>(res);
+    },
+
+    async getEntryPoints(repoId: string, limit = 8): Promise<EntryPoint[]> {
+      const res = await fetch(
+        `${BASE}/api/graph/${repoId}/entry-points?limit=${limit}`,
+        { headers: headers() },
+      );
+      return handleResponse<EntryPoint[]>(res);
     },
   },
 
@@ -284,6 +304,40 @@ export const api = {
   export: {
     url(repoId: string): string {
       return `${BASE}/api/annotations/repo/${repoId}/export`;
+    },
+  },
+
+  auth: {
+    async signup(
+      email: string,
+      password: string,
+    ): Promise<{ id: string; email: string }> {
+      const res = await fetch(`${BASE}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      return handleResponse(res);
+    },
+
+    async login(
+      email: string,
+      password: string,
+    ): Promise<{
+      access_token: string;
+      token_type: string;
+      user: { id: string; email: string };
+    }> {
+      // OAuth2PasswordRequestForm expects form-encoded body
+      const form = new URLSearchParams();
+      form.append("username", email);
+      form.append("password", password);
+      const res = await fetch(`${BASE}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: form.toString(),
+      });
+      return handleResponse(res);
     },
   },
 };

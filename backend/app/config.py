@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     top_k_vector: int = 10
     top_k_graph_hops: int = 3
 
+    # JWT
+    jwt_secret_key: str = Field(default="change-me-in-production-jwt-secret", alias="JWT_SECRET_KEY")
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 10080  # 7 days
+
 
 @lru_cache
 def get_settings() -> Settings:

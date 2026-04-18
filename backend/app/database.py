@@ -1,5 +1,5 @@
 from __future__ import annotations
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import SQLModel, create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -28,3 +28,7 @@ async def get_session() -> AsyncSession:  # type: ignore[override]
 async def create_db_and_tables() -> None:
     async with async_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+        # Idempotent migration: add owner_id to repos if not present
+        await conn.execute(text(
+            "ALTER TABLE repos ADD COLUMN IF NOT EXISTS owner_id VARCHAR REFERENCES users(id) ON DELETE SET NULL"
+        ))

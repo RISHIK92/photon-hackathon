@@ -1,27 +1,96 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter, usePathname } from "next/navigation";
-import { ArrowRight, AlertTriangle, Loader, FileCode, Search, TerminalSquare, GitBranch } from "lucide-react";
-import { api, type Repo, type Pin } from "@/lib/api";
+import {
+  ArrowRight,
+  AlertTriangle,
+  Loader,
+  FileCode,
+  Search,
+  TerminalSquare,
+  GitBranch,
+} from "lucide-react";
+import { api, type Repo, type Job, type Pin, type EntryPoint } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
+import IngestionProgress from "@/components/IngestionProgress";
 
 export default function RepoDashboard() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const pathname = usePathname();
   const [repo, setRepo] = useState<Repo | null>(null);
+  const [activeJob, setActiveJob] = useState<Job | null>(null);
   const [pins, setPins] = useState<Pin[]>([]);
+  const [entryPoints, setEntryPoints] = useState<EntryPoint[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (id) {
-      Promise.all([
-        api.repos.get(id).then(setRepo),
-        api.pins.listForRepo(id).then(setPins).catch(() => setPins([])), // gracefully degrade
-      ]).finally(() => setLoading(false));
+  const refreshRepo = useCallback(async () => {
+    if (!id) return;
+    const r = await api.repos.get(id);
+    setRepo(r);
+    // If repo is still ingesting, find the active job
+    if (r.status === "PENDING" || r.status === "INGESTING") {
+      const jobs = await api.jobs.listForRepo(id).catch(() => []);
+      const running = jobs.find(
+        (j) => j.status === "RUNNING" || j.status === "QUEUED",
+      );
+      setActiveJob(running ?? jobs[0] ?? null);
+    } else {
+      setActiveJob(null);
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    Promise.all([
+      api.repos.get(id),
+      api.jobs.listForRepo(id).catch(() => [] as Job[]),
+      api.pins.listForRepo(id).catch(() => [] as Pin[]),
+    ])
+      .then(([r, jobs, p]) => {
+        setRepo(r);
+        setPins(p);
+        if (r.status === "PENDING" || r.status === "INGESTING") {
+          const running = jobs.find(
+            (j) => j.status === "RUNNING" || j.status === "QUEUED",
+          );
+          setActiveJob(running ?? jobs[0] ?? null);
+        } else if (r.status === "READY") {
+          api.graph
+            .getEntryPoints(id)
+            .then(setEntryPoints)
+            .catch(() => {});
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  const handleIngestionComplete = useCallback(async () => {
+    const r = await api.repos.get(id!);
+    setRepo(r);
+    setActiveJob(null);
+    api.pins
+      .listForRepo(id!)
+      .then(setPins)
+      .catch(() => {});
+    api.graph
+      .getEntryPoints(id!)
+      .then(setEntryPoints)
+      .catch(() => {});
+  }, [id]);
+
+  const handleIngestionError = useCallback(
+    (msg: string) => {
+      // Re-fetch repo to get FAILED status
+      api.repos
+        .get(id!)
+        .then(setRepo)
+        .catch(() => {});
+      setActiveJob(null);
+    },
+    [id],
+  );
 
   if (loading) {
     return (
@@ -35,10 +104,100 @@ export default function RepoDashboard() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-ink-muted">
         <AlertTriangle size={32} className="text-burnt mb-4" />
-        <h3 className="font-serif text-xl mb-4 text-ink-primary">Repository not found</h3>
-        <button onClick={() => router.push('/')} className="btn-secondary">
+        <h3 className="font-serif text-xl mb-4 text-ink-primary">
+          Repository not found
+        </h3>
+        <button onClick={() => router.push("/")} className="btn-secondary">
           ← Back to Home
         </button>
+      </div>
+    );
+  }
+
+  // Show live ingestion progress overlay when ingesting
+  if ((repo.status === "PENDING" || repo.status === "INGESTING") && activeJob) {
+    return (
+      <div className="flex-1 flex flex-col min-h-[calc(100vh-56px)]">
+        {/* Decorative oversized number like the landing page */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[30rem] font-serif text-ink-primary opacity-[0.025] select-none pointer-events-none z-0">
+          02
+        </div>
+
+        <div className="relative z-10 flex flex-col lg:flex-row min-h-[calc(100vh-56px)]">
+          {/* Left rail — repo identity */}
+          <div className="w-full lg:w-72 shrink-0 border-b lg:border-b-0 lg:border-r border-warm-divider p-8 flex flex-col justify-between">
+            <div>
+              <p className="section-label mb-6">REPOSITORY</p>
+              <h1 className="font-serif text-3xl text-ink-primary font-bold leading-snug mb-2">
+                {repo.name}
+              </h1>
+              {repo.source_url && (
+                <p className="font-mono text-[10px] text-ink-label break-all leading-relaxed">
+                  {repo.source_url}
+                </p>
+              )}
+
+              <div className="divider-line my-6" />
+
+              <p className="section-label mb-3">WHAT HAPPENS NEXT</p>
+              <ul className="flex flex-col gap-3">
+                {[
+                  "Graph view of all dependencies",
+                  "AI-powered code search",
+                  "File-by-file explorer",
+                  "Impact analysis",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2">
+                    <div className="w-1 h-1 rounded-full bg-burnt mt-2 shrink-0" />
+                    <span className="font-serif text-sm text-ink-muted">
+                      {item}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="mt-8">
+              <button
+                onClick={() => router.push("/")}
+                className="btn-secondary w-full text-xs"
+              >
+                ← Back to Home
+              </button>
+            </div>
+          </div>
+
+          {/* Right panel — live progress */}
+          <div className="flex-1 p-8 lg:p-16 overflow-y-auto">
+            <IngestionProgress
+              jobId={activeJob.id}
+              repoId={repo.id}
+              onComplete={handleIngestionComplete}
+              onError={handleIngestionError}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show failed state
+  if (repo.status === "FAILED") {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4 text-center">
+        <AlertTriangle size={40} className="text-red-500" />
+        <h2 className="font-serif text-2xl text-ink-primary">
+          Ingestion Failed
+        </h2>
+        <p className="font-sans text-sm text-ink-muted max-w-md">
+          {repo.error_message ??
+            "An error occurred while indexing this repository."}
+        </p>
+        <div className="flex gap-3 mt-2">
+          <button onClick={() => router.push("/")} className="btn-secondary">
+            ← Back to Home
+          </button>
+        </div>
       </div>
     );
   }
@@ -56,7 +215,9 @@ export default function RepoDashboard() {
       {/* Top Bar */}
       <div className="mb-6">
         <div className="flex items-end gap-4 mb-2">
-          <h1 className="font-serif text-4xl text-ink-primary font-bold">{repo.name}</h1>
+          <h1 className="font-serif text-4xl text-ink-primary font-bold">
+            {repo.name}
+          </h1>
           <span className="bg-burnt/10 border border-burnt/20 text-burnt px-2 py-0.5 rounded-sm font-sans tracking-wider uppercase text-[11px] mb-1">
             main
           </span>
@@ -75,9 +236,18 @@ export default function RepoDashboard() {
           { label: "DEPENDENCIES", value: repo.cluster_count || 12 }, // placeholder for deps
           { label: "STATUS", value: repo.status, isStatus: true },
         ].map((card) => (
-          <div key={card.label} className="card p-5 flex flex-col justify-between h-28 hover:-translate-y-0.5 transition-transform">
-            <div className={`font-serif text-4xl font-medium ${card.isStatus && card.value === "READY" ? "text-burnt" : "text-ink-primary"}`}>
-              {card.isStatus ? (card.value === "READY" ? "Complete" : card.value) : card.value}
+          <div
+            key={card.label}
+            className="card p-5 flex flex-col justify-between h-28 hover:-translate-y-0.5 transition-transform"
+          >
+            <div
+              className={`font-serif text-4xl font-medium ${card.isStatus && card.value === "READY" ? "text-burnt" : "text-ink-primary"}`}
+            >
+              {card.isStatus
+                ? card.value === "READY"
+                  ? "Complete"
+                  : card.value
+                : card.value}
             </div>
             <div className="section-label">{card.label}</div>
           </div>
@@ -91,7 +261,9 @@ export default function RepoDashboard() {
             key={tab.label}
             onClick={() => router.push(tab.path)}
             className={`pb-3 font-sans text-xs tracking-wider transition-colors relative ${
-              pathname === tab.path ? "text-ink-primary font-medium" : "text-ink-muted hover:text-ink-primary"
+              pathname === tab.path
+                ? "text-ink-primary font-medium"
+                : "text-ink-muted hover:text-ink-primary"
             }`}
           >
             {tab.label}
@@ -111,19 +283,53 @@ export default function RepoDashboard() {
             <div>
               <h4 className="section-label mb-4">ENTRY POINTS</h4>
               <ul className="flex flex-col gap-4">
-                {[
-                  { func: "init_server()", file: "src/main.rs" },
-                  { func: "setup_routes()", file: "src/api/routes.rs" },
-                  { func: "connect_db()", file: "src/db/connection.rs" },
-                ].map((entry, i) => (
-                  <li key={i} className="flex gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-burnt mt-2 shrink-0" />
-                    <div>
-                      <div className="font-mono text-sm text-ink-primary">{entry.func}</div>
-                      <div className="font-sans text-xs text-ink-muted mt-0.5">{entry.file}</div>
-                    </div>
+                {entryPoints.length === 0 ? (
+                  <li className="font-serif italic text-ink-muted text-sm">
+                    — No entry points detected —
                   </li>
-                ))}
+                ) : (
+                  entryPoints.slice(0, 5).map((ep) => {
+                    const filename = ep.path.split("/").pop() ?? ep.path;
+                    const dir = ep.path.includes("/")
+                      ? ep.path.slice(0, ep.path.lastIndexOf("/"))
+                      : "";
+                    return (
+                      <li
+                        key={ep.id}
+                        className="flex gap-3 cursor-pointer group"
+                        onClick={() =>
+                          router.push(
+                            `/repos/${id}/file?path=${encodeURIComponent(ep.path)}`,
+                          )
+                        }
+                      >
+                        <div className="w-1.5 h-1.5 rounded-full bg-burnt mt-2 shrink-0 group-hover:scale-125 transition-transform" />
+                        <div className="min-w-0">
+                          <div className="font-mono text-sm text-ink-primary group-hover:text-burnt transition-colors truncate">
+                            {ep.top_symbols.length > 0
+                              ? `${ep.top_symbols[0]}()`
+                              : filename}
+                          </div>
+                          <div className="font-sans text-xs text-ink-muted mt-0.5 truncate">
+                            {ep.path}
+                          </div>
+                          {ep.top_symbols.length > 1 && (
+                            <div className="flex gap-1 mt-1 flex-wrap">
+                              {ep.top_symbols.slice(1).map((sym) => (
+                                <span
+                                  key={sym}
+                                  className="font-mono text-[10px] text-ink-label bg-warm-tertiary border border-warm-divider rounded px-1.5 py-0.5"
+                                >
+                                  {sym}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })
+                )}
               </ul>
             </div>
 
@@ -132,11 +338,15 @@ export default function RepoDashboard() {
               <h4 className="section-label mb-4">SAVED PINS (QUERIES)</h4>
               <ul className="flex flex-col gap-4">
                 {pins.length === 0 ? (
-                  <li className="font-serif italic text-ink-muted text-sm">— No saved pins yet —</li>
+                  <li className="font-serif italic text-ink-muted text-sm">
+                    — No saved pins yet —
+                  </li>
                 ) : (
                   pins.slice(0, 3).map((pin, i) => (
                     <li key={pin.id}>
-                      <div className="font-serif italic text-ink-primary text-sm mb-1">"{pin.question}"</div>
+                      <div className="font-serif italic text-ink-primary text-sm mb-1">
+                        "{pin.question}"
+                      </div>
                       <div className="font-sans text-xs text-ink-muted">
                         {new Date(pin.created_at).toLocaleDateString()}
                       </div>
@@ -159,11 +369,18 @@ export default function RepoDashboard() {
                 const width = `${(mockCount / maxVal) * 100}%`;
                 return (
                   <div key={i} className="flex items-center gap-4">
-                    <div className="w-48 truncate font-serif text-sm text-ink-primary">{mod}</div>
-                    <div className="flex-1 h-2 bg-warm-divider rounded-full overflow-hidden">
-                      <div className="h-full bg-burnt opacity-80" style={{ width }} />
+                    <div className="w-48 truncate font-serif text-sm text-ink-primary">
+                      {mod}
                     </div>
-                    <div className="w-8 text-right font-sans text-xs text-ink-muted">{mockCount}</div>
+                    <div className="flex-1 h-2 bg-warm-divider rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-burnt opacity-80"
+                        style={{ width }}
+                      />
+                    </div>
+                    <div className="w-8 text-right font-sans text-xs text-ink-muted">
+                      {mockCount}
+                    </div>
                   </div>
                 );
               })}
@@ -176,18 +393,50 @@ export default function RepoDashboard() {
           <h4 className="section-label mb-4">QUICK ACTIONS</h4>
           <div className="flex flex-col gap-3">
             {[
-              { num: "I", title: "Trace a Function", desc: "Find callers and definitions", icon: <Search size={14} /> },
-              { num: "II", title: "Find Usages", desc: "Locate variable references", icon: <FileCode size={14} /> },
-              { num: "III", title: "Explain a File", desc: "AI-generated summaries", icon: <TerminalSquare size={14} /> },
-              { num: "IV", title: "Run Impact Analysis", desc: "Simulate code changes", icon: <GitBranch size={14} /> },
+              {
+                num: "I",
+                title: "Trace a Function",
+                desc: "Find callers and definitions",
+                icon: <Search size={14} />,
+              },
+              {
+                num: "II",
+                title: "Find Usages",
+                desc: "Locate variable references",
+                icon: <FileCode size={14} />,
+              },
+              {
+                num: "III",
+                title: "Explain a File",
+                desc: "AI-generated summaries",
+                icon: <TerminalSquare size={14} />,
+              },
+              {
+                num: "IV",
+                title: "Run Impact Analysis",
+                desc: "Simulate code changes",
+                icon: <GitBranch size={14} />,
+              },
             ].map((action) => (
-              <div key={action.num} className="card p-4 flex items-center gap-4 cursor-pointer hover:border-burnt/50 transition-colors group">
-                <div className="text-burnt font-serif font-bold w-4 text-center">{action.num}</div>
-                <div className="flex-1">
-                  <div className="font-serif text-sm text-ink-primary font-medium">{action.title}</div>
-                  <div className="font-serif text-xs text-ink-muted mt-0.5">{action.desc}</div>
+              <div
+                key={action.num}
+                className="card p-4 flex items-center gap-4 cursor-pointer hover:border-burnt/50 transition-colors group"
+              >
+                <div className="text-burnt font-serif font-bold w-4 text-center">
+                  {action.num}
                 </div>
-                <ArrowRight size={14} className="text-burnt opacity-50 group-hover:opacity-100 transition-opacity" />
+                <div className="flex-1">
+                  <div className="font-serif text-sm text-ink-primary font-medium">
+                    {action.title}
+                  </div>
+                  <div className="font-serif text-xs text-ink-muted mt-0.5">
+                    {action.desc}
+                  </div>
+                </div>
+                <ArrowRight
+                  size={14}
+                  className="text-burnt opacity-50 group-hover:opacity-100 transition-opacity"
+                />
               </div>
             ))}
           </div>
