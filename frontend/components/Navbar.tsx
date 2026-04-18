@@ -45,8 +45,8 @@ export default function Navbar() {
         <span>YASML</span>
       </Link>
 
-      {/* Center: Nav links (Desktop) */}
-      <div className="hidden md:flex items-center gap-6">
+      {/* Center: Nav links (Desktop) — absolutely centered so logo/auth don't affect position */}
+      <div className="hidden md:flex items-center gap-6 absolute left-1/2 -translate-x-1/2">
         {navLinks.map((link) => {
           const isActive = pathname === link.path;
           return "external" in link && link.external ? (
